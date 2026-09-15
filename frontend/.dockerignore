@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.venv/
+node_modules/
+dist/
+*.tsbuildinfo
+npm-debug.log*
