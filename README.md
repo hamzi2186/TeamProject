@@ -1,3 +1,0 @@
-# TeamProject
-
-Hello!
