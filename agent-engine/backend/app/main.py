@@ -7,8 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.api.admin import router as admin_router
-from app.api.retrieval import internal_router as internal_retrieval_router
-from app.api.retrieval import public_router as retrieval_router
+from app.api.retrieval import router as retrieval_router
 from app.core.config import get_settings
 from app.db.session import engine
 
@@ -27,11 +26,10 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Agent-Service-Token"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(admin_router)
 app.include_router(retrieval_router)
-app.include_router(internal_retrieval_router)
 
 
 @app.middleware("http")

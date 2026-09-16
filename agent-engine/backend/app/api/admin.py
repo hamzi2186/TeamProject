@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_admin_or_internal_service
+from app.auth.dependencies import require_admin_or_dev
 from app.db.session import get_db
 from app.models.agent import AgentDocument
 from app.schemas.agent import AgentDocumentSummary, IngestRequest, IngestResponse
@@ -13,7 +13,7 @@ from app.services.ingestion import AgentIngestionService
 router = APIRouter(
     prefix="/api/v1/agent/admin",
     tags=["agent-admin"],
-    dependencies=[Depends(require_admin_or_internal_service)],
+    dependencies=[Depends(require_admin_or_dev)],
 )
 
 

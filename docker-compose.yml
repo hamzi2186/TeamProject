@@ -147,7 +147,6 @@ services:
       TPI_API_BASE_URL: http://tpi:8001
       AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
       FRONTEND_ORIGINS: http://localhost:5174,http://localhost:5173
-      AGENT_INTERNAL_SERVICE_TOKEN: ${AGENT_INTERNAL_SERVICE_TOKEN:-local-agent-service-token}
       DOCS_ROOT_PATH: /app/docs/agent-knowledge
     volumes:
       - ./docs:/app/docs:ro

@@ -21,7 +21,6 @@ class Settings(BaseSettings):
     database_url: str
     tpi_api_base_url: str = "http://localhost:8001"
     tpi_internal_service_token: str
-    agent_internal_service_token: str
     auth_jwks_url: str = "http://localhost:8000/.well-known/jwks.json"
     auth_issuer: str = "t-rex"
     auth_audience: str = "t-rex-engines"
@@ -54,7 +53,7 @@ class Settings(BaseSettings):
             driver = "postgresql+asyncpg"
         return f"{driver}://{remainder}"
 
-    @field_validator("tpi_internal_service_token", "agent_internal_service_token")
+    @field_validator("tpi_internal_service_token")
     @classmethod
     def require_service_token(cls, value: str) -> str:
         if not value.strip():

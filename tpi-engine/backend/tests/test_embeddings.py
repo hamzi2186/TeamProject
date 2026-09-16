@@ -10,6 +10,7 @@ from app.main import app
 from app.providers.embeddings.errors import (
     EmbeddingDimensionError,
     EmbeddingRateLimitError,
+    EmbeddingUnavailableError,
     MalformedEmbeddingResponseError,
 )
 from app.providers.embeddings.jina import JINA_EMBEDDINGS_URL, JinaEmbeddingProvider
@@ -259,3 +260,31 @@ def test_agent_header_forwarded_to_service(monkeypatch):
     assert response_query.status_code == 200
     assert captured_consumer == ["agent", "agent"]
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_agent_missing_key_fails_explicitly_and_does_not_fallback_to_scraper():
+    scraper_jina_provider = LocalHashEmbeddingProvider(
+        model="scraper-jina-model",
+        dimension=1024,
+    )
+    # Service where Scraper Jina is configured as primary, but agent_provider is None (missing key)
+    service = EmbeddingService(
+        providers={"jina": scraper_jina_provider},
+        primary="jina",
+        fallback=None,
+        agent_provider=None,
+    )
+
+    # Scraper/default consumer succeeds using scraper provider
+    res_scraper = await service.passages(["scraper text"])
+    assert res_scraper.model == "scraper-jina-model"
+
+    # Agent consumer MUST fail explicitly and NOT silently use scraper provider
+    with pytest.raises(EmbeddingUnavailableError) as exc_info:
+        await service.passages(["agent text"], consumer="agent")
+    assert "not configured" in str(exc_info.value).lower()
+
+    with pytest.raises(EmbeddingUnavailableError) as exc_query:
+        await service.query("agent query", consumer="agent")
+    assert "not configured" in str(exc_query.value).lower()

@@ -1,4 +1,3 @@
-import secrets
 import time
 from dataclasses import dataclass
 from typing import Annotated
@@ -6,7 +5,7 @@ from uuid import UUID
 
 import httpx
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt.algorithms import RSAAlgorithm
 
@@ -93,33 +92,3 @@ async def require_admin_or_dev(
     if user.role not in {"developer", "team_member", "admin"}:
         raise HTTPException(403, "Insufficient permissions")
     return user
-
-
-def require_internal_service(
-    x_agent_service_token: Annotated[str | None, Header(alias="X-Agent-Service-Token")] = None,
-) -> None:
-    if not x_agent_service_token or not secrets.compare_digest(
-        x_agent_service_token, get_settings().agent_internal_service_token
-    ):
-        raise HTTPException(401, "Invalid internal service credentials")
-
-
-async def require_admin_or_internal_service(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)] = None,
-    x_agent_service_token: Annotated[str | None, Header(alias="X-Agent-Service-Token")] = None,
-) -> None:
-    # 1. Try service token
-    if x_agent_service_token and secrets.compare_digest(
-        x_agent_service_token, get_settings().agent_internal_service_token
-    ):
-        return
-
-    # 2. Try JWT
-    if credentials:
-        user = await get_current_user(credentials)
-        if user.role in {"developer", "team_member", "admin"}:
-            return
-        raise HTTPException(403, "Insufficient permissions")
-
-    raise HTTPException(401, "Authentication required (service token or privileged JWT)")
-

@@ -20,20 +20,27 @@ def test_health():
 
 def test_admin_ingest_requires_auth():
     client = TestClient(app)
-    # No auth header
+    # No auth header -> 401
     response = client.post("/api/v1/agent/admin/ingest", json={})
     assert response.status_code == 401
 
-    # Invalid service token
-    response_invalid = client.post(
-        "/api/v1/agent/admin/ingest",
-        json={},
-        headers={"X-Agent-Service-Token": "wrong-token"},
+
+def test_admin_ingest_rejects_customer_role():
+    app.dependency_overrides[get_db] = lambda: AsyncMock()
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        user_id=uuid.uuid4(), role="customer"
     )
-    assert response_invalid.status_code == 401
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/agent/admin/ingest",
+        json={"module_key": "scraper", "force": False},
+    )
+    assert response.status_code == 403
+    app.dependency_overrides.clear()
 
 
-def test_admin_ingest_with_valid_service_token(monkeypatch):
+def test_admin_ingest_allows_admin_role(monkeypatch):
     mock_ingest = AsyncMock(
         return_value=IngestResponse(
             scanned=4,
@@ -56,12 +63,14 @@ def test_admin_ingest_with_valid_service_token(monkeypatch):
     monkeypatch.setattr(AgentIngestionService, "ingest", mock_ingest)
 
     app.dependency_overrides[get_db] = lambda: AsyncMock()
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        user_id=uuid.uuid4(), role="admin"
+    )
     client = TestClient(app)
 
     response = client.post(
         "/api/v1/agent/admin/ingest",
         json={"module_key": "scraper", "force": False},
-        headers={"X-Agent-Service-Token": "test-agent-token"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -71,30 +80,13 @@ def test_admin_ingest_with_valid_service_token(monkeypatch):
     app.dependency_overrides.clear()
 
 
-def test_internal_search_with_valid_token(monkeypatch):
-    mock_search = AsyncMock(
-        return_value=AgentSearchResponse(
-            query="test query",
-            module_filter="scraper",
-            total=0,
-            items=[],
-        )
-    )
-    monkeypatch.setattr(AgentRetrievalService, "search", mock_search)
-
-    app.dependency_overrides[get_db] = lambda: AsyncMock()
+def test_public_search_requires_auth():
     client = TestClient(app)
-
     response = client.post(
-        "/api/v1/internal/agent/search",
-        json={"query": "test query", "module_filter": "scraper"},
-        headers={"X-Agent-Service-Token": "test-agent-token"},
+        "/api/v1/agent/retrieval/search",
+        json={"query": "test query"},
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["query"] == "test query"
-    assert data["total"] == 0
-    app.dependency_overrides.clear()
+    assert response.status_code == 401
 
 
 def test_public_search_with_user_auth(monkeypatch):
@@ -120,4 +112,3 @@ def test_public_search_with_user_auth(monkeypatch):
     )
     assert response.status_code == 200
     app.dependency_overrides.clear()
-
