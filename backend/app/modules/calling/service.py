@@ -83,6 +83,32 @@ class CallingService:
             "status": call.status,
         }
 
+    async def _auto_advance_simulated(self, call: CallRecord) -> CallRecord:
+        now = datetime.now(timezone.utc)
+        if call.status == "QUEUED" and call.provider_call_id and call.provider_call_id.startswith("vapi-sim-"):
+            diff = (now - call.started_at).total_seconds() if call.started_at else 10
+            if diff >= 3:
+                transcript = (
+                    "AI (T Rex Voice Assistant): Hello, this is Alex calling from T Rex CRM on behalf of the sales automation team. Am I speaking with the business owner?\n"
+                    "Lead: Yes, hello! I can hear you. What is this call regarding?\n"
+                    "AI (T Rex Voice Assistant): We noticed your interest in automating lead intelligence, omnichannel outreach, and voice follow-ups. We wanted to see if scheduling a quick product demo makes sense for your team.\n"
+                    "Lead: That sounds great actually. We definitely need a way to follow up with leads automatically without manual dialing.\n"
+                    "AI (T Rex Voice Assistant): Excellent! I have scheduled our product specialist for a 15-minute demo tomorrow. You will receive the calendar invitation shortly.\n"
+                    "Lead: Perfect, thank you!\n"
+                    "AI (T Rex Voice Assistant): Thank you, have a wonderful day ahead!"
+                )
+                summary = "Lead answered outbound AI call, confirmed high interest in CRM automation and lead follow-up, and agreed to a 15-minute demonstration."
+                call = call.model_copy(update={
+                    "status": "COMPLETED",
+                    "outcome": "INTERESTED",
+                    "duration_seconds": 65,
+                    "ended_at": now,
+                    "transcript": transcript,
+                    "summary": summary,
+                })
+                await self.repository.save(call)
+        return call
+
     async def list_calls(
         self,
         user: AuthenticatedUser,
@@ -92,6 +118,7 @@ class CallingService:
         lead_id: str | None = None,
     ) -> list[dict[str, Any]]:
         calls = await self.repository.list_for_user(user.user_id)
+        calls = [await self._auto_advance_simulated(c) for c in calls]
         if status_filter:
             calls = [c for c in calls if c.status == status_filter.upper()]
         if outcome:
@@ -102,9 +129,9 @@ class CallingService:
 
     async def get_call(self, user: AuthenticatedUser, call_id: str) -> dict[str, Any]:
         try:
-            return (await self.repository.get_for_user(user.user_id, call_id)).model_dump(
-                mode="json"
-            )
+            call = await self.repository.get_for_user(user.user_id, call_id)
+            call = await self._auto_advance_simulated(call)
+            return call.model_dump(mode="json")
         except CallNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Call not found"
