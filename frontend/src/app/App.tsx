@@ -1,22 +1,30 @@
-import { Navigate, Route, Routes } from "react-router-dom";
-import { AuthPage } from "../auth/AuthPage";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Route, Routes, Navigate } from "react-router-dom";
+import { AuthGuard } from "../auth/AuthGuard";
+import { CallingListPage } from "../pages/Calling/index";
+import { CallDetailPage } from "../pages/Calling/CallDetailPage";
 
-function PlaceholderDashboard() {
-  const token = sessionStorage.getItem("trex_access_token");
-  if (!token) return <Navigate to="/auth/login" replace />;
-  return <main className="placeholder"><div className="brand-mark">T</div><h1>T Rex foundation is ready</h1><p>Shared authentication is connected. Product modules follow in the next phases.</p></main>;
-}
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: true,
+    },
+  },
+});
 
 export function App() {
   return (
-    <Routes>
-      <Route path="/" element={<PlaceholderDashboard />} />
-      <Route path="/auth/login" element={<AuthPage mode="login" />} />
-      <Route path="/auth/register" element={<AuthPage mode="register" />} />
-      <Route path="/auth/verify-email" element={<AuthPage mode="verify" />} />
-      <Route path="/auth/forgot-password" element={<AuthPage mode="forgot" />} />
-      <Route path="/auth/reset-password" element={<AuthPage mode="reset" />} />
-      <Route path="*" element={<Navigate to="/auth/login" replace />} />
-    </Routes>
+    <QueryClientProvider client={queryClient}>
+      <AuthGuard>
+        <Routes>
+          <Route path="/calling" element={<CallingListPage />} />
+          <Route path="/calling/:callId" element={<CallDetailPage />} />
+          {/* Default redirect to calling list */}
+          <Route path="/" element={<Navigate to="/calling" replace />} />
+          <Route path="*" element={<Navigate to="/calling" replace />} />
+        </Routes>
+      </AuthGuard>
+    </QueryClientProvider>
   );
 }
