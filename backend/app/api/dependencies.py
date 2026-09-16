@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.services.hubspot_import import HubSpotImportService
 from app.services.leads import LeadRepository
-from app.services.scraper_client import ScraperClient, get_scraper_client
 from app.services.tpi_hubspot import TPIHubSpotClient, get_tpi_hubspot_client
 
 

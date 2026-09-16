@@ -1,31 +1,51 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { AuthGuard } from "../auth/AuthGuard";
 import { AuthPage } from "../auth/AuthPage";
+import { AppShell } from "./AppShell";
 import { HubSpotPage } from "../hubspot/HubSpotPage";
 import { LeadDetailPage } from "../leads/LeadDetailPage";
 import { LeadsPage } from "../leads/LeadsPage";
-import { AppShell } from "./AppShell";
+import { CallDetailPage } from "../pages/Calling/CallDetailPage";
+import { CallingListPage } from "../pages/Calling/index";
+import { EngineHub } from "../pages/EngineHub";
 
-function ProtectedShell() {
-  const token = sessionStorage.getItem("trex_access_token");
-  if (!token) return <Navigate to="/auth/login" replace />;
-  return <AppShell />;
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: true,
+    },
+  },
+});
+
+function ProtectedLayout() {
+  return (
+    <AuthGuard>
+      <AppShell />
+    </AuthGuard>
+  );
 }
 
 export function App() {
   return (
-    <Routes>
-      <Route element={<ProtectedShell />}>
-        <Route path="/" element={<Navigate to="/leads" replace />} />
-        <Route path="/hubspot" element={<HubSpotPage />} />
-        <Route path="/leads" element={<LeadsPage />} />
-        <Route path="/leads/:leadId" element={<LeadDetailPage />} />
-      </Route>
-      <Route path="/auth/login" element={<AuthPage mode="login" />} />
-      <Route path="/auth/register" element={<AuthPage mode="register" />} />
-      <Route path="/auth/verify-email" element={<AuthPage mode="verify" />} />
-      <Route path="/auth/forgot-password" element={<AuthPage mode="forgot" />} />
-      <Route path="/auth/reset-password" element={<AuthPage mode="reset" />} />
-      <Route path="*" element={<Navigate to="/auth/login" replace />} />
-    </Routes>
+    <QueryClientProvider client={queryClient}>
+      <Routes>
+        <Route element={<ProtectedLayout />}>
+          <Route path="/" element={<EngineHub />} />
+          <Route path="/calling" element={<CallingListPage />} />
+          <Route path="/calling/:callId" element={<CallDetailPage />} />
+          <Route path="/hubspot" element={<HubSpotPage />} />
+          <Route path="/leads" element={<LeadsPage />} />
+          <Route path="/leads/:leadId" element={<LeadDetailPage />} />
+        </Route>
+        <Route path="/auth/login" element={<AuthPage mode="login" />} />
+        <Route path="/auth/register" element={<AuthPage mode="register" />} />
+        <Route path="/auth/verify-email" element={<AuthPage mode="verify" />} />
+        <Route path="/auth/forgot-password" element={<AuthPage mode="forgot" />} />
+        <Route path="/auth/reset-password" element={<AuthPage mode="reset" />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </QueryClientProvider>
   );
 }

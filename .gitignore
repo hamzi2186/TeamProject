@@ -1,18 +1,16 @@
 .env
-.env.*
-**/.env
-**/.env.*
-!.env.example
-!**/.env.example
 .secrets/
 **/.secrets/
+Calling agent/
 .venv/
-**/__pycache__/
+__pycache__/
 *.py[cod]
 .pytest_cache/
-.ruff_cache/
+.mypy_cache/
 node_modules/
-**/node_modules/
 dist/
-**/dist/
+postgres-data/
+
 *.tsbuildinfo
+*.db
+*.sqlite3

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     otp_resend_cooldown_seconds: int = 60
     otp_max_attempts: int = 5
 
+    # Calling engine
+    calling_internal_webhook_url: str = "http://localhost:8000/api/v1/webhooks/vapi/events"
+    tpi_request_timeout_seconds: float = 20.0
+
     @field_validator("database_url")
     @classmethod
     def normalize_database_url(cls, value: str) -> str:

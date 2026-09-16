@@ -1,4 +1,5 @@
 services:
+  # ── Redis ──────────────────────────────────────────────────────────────
   redis:
     image: redis:7.4-alpine
     command: ["redis-server", "--appendonly", "yes"]
@@ -12,6 +13,7 @@ services:
       timeout: 3s
       retries: 10
 
+  # ── TPI Engine ─────────────────────────────────────────────────────────
   tpi:
     build: ./tpi-engine/backend
     env_file:
@@ -19,6 +21,7 @@ services:
       - ./tpi-engine/backend/.env
     environment:
       REDIS_URL: redis://redis:6379/0
+      CALLING_INTERNAL_WEBHOOK_URL: http://backend:8000/api/v1/webhooks/vapi/events
     ports:
       - "8001:8001"
     healthcheck:
@@ -27,6 +30,7 @@ services:
       timeout: 3s
       retries: 10
 
+  # ── Root Platform Backend ──────────────────────────────────────────────
   backend:
     build: ./backend
     env_file:
@@ -37,6 +41,7 @@ services:
       SCRAPER_API_BASE_URL: http://scraper-backend:8002
       AUTH_JWT_PRIVATE_KEY_PATH: /app/.secrets/auth_private.pem
       AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
+      CALLING_INTERNAL_WEBHOOK_URL: http://backend:8000/api/v1/webhooks/vapi/events
     command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
@@ -53,6 +58,7 @@ services:
       timeout: 5s
       retries: 12
 
+  # ── Root Platform Worker ───────────────────────────────────────────────
   worker:
     build: ./backend
     env_file:
@@ -62,7 +68,7 @@ services:
       TPI_API_BASE_URL: http://tpi:8001
       AUTH_JWT_PRIVATE_KEY_PATH: /app/.secrets/auth_private.pem
       AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
-    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "platform.default,platform.auth_email"]
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "platform.default,platform.auth_email,calling.calls"]
     volumes:
       - ./backend/.secrets:/app/.secrets
     depends_on:
@@ -71,17 +77,20 @@ services:
       backend:
         condition: service_healthy
 
+  # ── Root Frontend ──────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
       args:
         VITE_API_BASE_URL: http://localhost:8000
+        VITE_ROOT_AUTH_URL: http://localhost:5173/auth/login
     ports:
       - "5173:80"
     depends_on:
       backend:
         condition: service_healthy
 
+  # ── Scraper Engine ─────────────────────────────────────────────────────
   scraper-backend:
     build: ./scraper-engine/backend
     env_file:
@@ -139,6 +148,7 @@ services:
       scraper-backend:
         condition: service_healthy
 
+  # ── Agent Engine ───────────────────────────────────────────────────────
   agent-backend:
     build: ./agent-engine/backend
     env_file:
@@ -163,7 +173,7 @@ services:
       timeout: 5s
       retries: 12
 
-  # ─── SMS Engine (port 8004 / frontend 5175) ───────────────────────────────
+  # ── SMS Engine ─────────────────────────────────────────────────────────
   sms-db:
     image: postgres:16-alpine
     environment:
