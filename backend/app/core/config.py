@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     frontend_url: str = "http://localhost:5173"
     backend_url: str = "http://localhost:8000"
-    database_url: str
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/trex_dev"
     redis_url: str = "redis://localhost:6379/0"
     tpi_api_base_url: str = "http://localhost:8001"
     tpi_internal_service_token: str
