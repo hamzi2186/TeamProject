@@ -34,6 +34,7 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       TPI_API_BASE_URL: http://tpi:8001
+      SCRAPER_API_BASE_URL: http://scraper-backend:8002
       AUTH_JWT_PRIVATE_KEY_PATH: /app/.secrets/auth_private.pem
       AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
     command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

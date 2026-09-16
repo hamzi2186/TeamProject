@@ -96,8 +96,19 @@ async def ingest(
 async def list_websites(
     current: Annotated[AuthenticatedUser, Depends(get_current_user)],
     repository: Annotated[ScraperRepository, Depends(get_repository)],
+    url: str | None = None,
 ) -> list[WebsiteResponse]:
-    return [website_response(item) for item in await repository.list_websites(current.user_id)]
+    normalized_key: str | None = None
+    if url:
+        try:
+            normalized = normalize_website_url(url)
+            normalized_key = normalized.normalized_key
+        except Exception:
+            return []
+    return [
+        website_response(item)
+        for item in await repository.list_websites(current.user_id, normalized_key=normalized_key)
+    ]
 
 
 @router.get("/websites/{website_id}", response_model=WebsiteResponse)

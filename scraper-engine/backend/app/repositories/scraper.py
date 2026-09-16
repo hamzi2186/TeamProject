@@ -165,14 +165,16 @@ class ScraperRepository:
         )
         await self.db.commit()
 
-    async def list_websites(self, user_id: UUID) -> list[WebsiteSummary]:
+    async def list_websites(
+        self, user_id: UUID, normalized_key: str | None = None
+    ) -> list[WebsiteSummary]:
         lead_count = (
             select(func.count(Lead.id))
             .where(Lead.website_id == Website.id, Lead.user_id == user_id)
             .correlate(Website)
             .scalar_subquery()
         )
-        result = await self.db.execute(
+        query = (
             select(Website, KnowledgeBase, lead_count.label("lead_count"))
             .outerjoin(
                 KnowledgeBase,
@@ -181,8 +183,10 @@ class ScraperRepository:
                 & (KnowledgeBase.kb_type == "CLIENT"),
             )
             .where(Website.user_id == user_id)
-            .order_by(Website.updated_at.desc())
         )
+        if normalized_key is not None:
+            query = query.where(Website.normalized_key == normalized_key)
+        result = await self.db.execute(query.order_by(Website.updated_at.desc()))
         return [
             WebsiteSummary(
                 website=website,

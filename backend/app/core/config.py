@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     tpi_api_base_url: str = "http://localhost:8001"
     tpi_internal_service_token: str
+    scraper_api_base_url: str = "http://localhost:8002"
 
     auth_jwt_algorithm: str = "RS256"
     auth_jwt_private_key_path: Path = Path(".secrets/auth_private.pem")
