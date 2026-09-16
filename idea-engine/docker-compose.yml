@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  idea-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trex-idea-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8006}:8006"
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/postgres}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - TPI_API_BASE_URL=${TPI_API_BASE_URL:-http://tpi:8001}
+      - REPORTS_STORAGE_DIR=/app/storage/reports
+      - REPORT_RUN_CRON=${REPORT_RUN_CRON:-59 23 * * *}
+      - FRONTEND_ORIGINS=${FRONTEND_ORIGINS:-http://localhost:5176,http://localhost:5173}
+    volumes:
+      - reports_data:/app/storage/reports
+
+  idea-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trex-idea-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "-B", "-l", "info"]
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/postgres}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - TPI_API_BASE_URL=${TPI_API_BASE_URL:-http://tpi:8001}
+      - REPORTS_STORAGE_DIR=/app/storage/reports
+      - REPORT_RUN_CRON=${REPORT_RUN_CRON:-59 23 * * *}
+    volumes:
+      - reports_data:/app/storage/reports
+
+  idea-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://localhost:8006
+    container_name: trex-idea-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5176}:80"
+    depends_on:
+      - idea-backend
+
+volumes:
+  reports_data:
