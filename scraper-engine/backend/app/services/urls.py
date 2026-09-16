@@ -4,43 +4,94 @@ from dataclasses import dataclass
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 
 TRACKING_PARAMETERS = {
+    "_ga",
+    "_gl",
     "fbclid",
     "gclid",
+    "hscid",
+    "igshid",
     "mc_cid",
     "mc_eid",
+    "msclkid",
     "ref",
     "referrer",
+    "source",
+    "trk",
+    "twclid",
+    "yclid",
+}
+SEARCH_QUERY_PARAMETERS = {
+    "keyword",
+    "q",
+    "query",
+    "s",
+    "search",
+    "search_term",
 }
 SKIPPED_SCHEMES = {"mailto", "tel", "javascript", "data", "file", "ftp"}
-SKIPPED_PATH_PARTS = {
-    "logout",
-    "signout",
-    "checkout",
+SKIPPED_PATH_SEGMENTS = {
+    "account",
+    "admin",
+    "atom",
     "cart",
+    "checkout",
+    "feed",
+    "login",
+    "logout",
+    "my-account",
+    "register",
+    "rss",
+    "search",
+    "sign-in",
+    "sign-out",
+    "sign-up",
+    "signin",
+    "signout",
+    "signup",
     "wp-admin",
-    "admin/logout",
+    "wp-includes",
+    "wp-json",
+    "xmlrpc.php",
 }
+SKIPPED_PATH_PARTS = SKIPPED_PATH_SEGMENTS
 SKIPPED_EXTENSIONS = {
     ".7z",
+    ".ai",
     ".avi",
+    ".bin",
+    ".bmp",
     ".css",
+    ".csv",
+    ".dmg",
     ".doc",
     ".docx",
     ".eot",
+    ".eps",
+    ".exe",
+    ".flv",
     ".gif",
     ".gz",
     ".ico",
+    ".iso",
     ".jpeg",
     ".jpg",
     ".js",
     ".json",
+    ".m4a",
+    ".m4v",
     ".map",
+    ".mkv",
     ".mov",
     ".mp3",
     ".mp4",
+    ".ogg",
+    ".ogv",
+    ".otf",
     ".pdf",
     ".png",
+    ".psd",
     ".rar",
+    ".rtf",
     ".svg",
     ".tar",
     ".tgz",
@@ -163,8 +214,27 @@ def canonicalize_crawl_url(
     authority = f"{display_host}:{port}" if port else display_host
     path = _path(parsed.path)
     lowered = path.casefold()
-    if any(part in lowered for part in SKIPPED_PATH_PARTS):
+
+    segments = [seg for seg in lowered.split("/") if seg]
+    for seg in segments:
+        if (
+            seg in SKIPPED_PATH_SEGMENTS
+            or seg.startswith("wp-admin")
+            or seg.startswith("wp-login")
+        ):
+            return None
+
+    if lowered.endswith(".rss") or lowered.endswith(".atom") or lowered.endswith("/feed"):
         return None
+
+    query_params = parse_qsl(parsed.query, keep_blank_values=False)
+    for key, _ in query_params:
+        folded_key = key.casefold()
+        if folded_key in SEARCH_QUERY_PARAMETERS:
+            return None
+        if folded_key == "feed":
+            return None
+
     if any(lowered.endswith(extension) for extension in SKIPPED_EXTENSIONS) and not (
         allow_sitemap and lowered.endswith(".xml")
     ):

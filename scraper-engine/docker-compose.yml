@@ -20,6 +20,7 @@ services:
     env_file: ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379/0
+      CRAWL_MAX_PAGES: ${CRAWL_MAX_PAGES:-100}
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "scraper.crawling,scraper.embeddings"]
     depends_on:
       - redis

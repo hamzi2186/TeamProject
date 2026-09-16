@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     auth_jwt_algorithm: str = "RS256"
     frontend_origins: str = "http://localhost:5174,http://localhost:5173"
 
-    crawl_max_pages: int = 200
+    crawl_max_pages: int = 100
     crawl_max_depth: int = 8
     crawl_request_timeout_seconds: float = 20
     crawl_concurrency: int = 5

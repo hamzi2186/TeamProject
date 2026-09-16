@@ -116,7 +116,7 @@ services:
       AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
       SCRAPER_INTERNAL_SERVICE_TOKEN: ${SCRAPER_INTERNAL_SERVICE_TOKEN:-local-scraper-service-token}
       IS_CELERY_WORKER: "true"
-      CRAWL_MAX_PAGES: 25
+      CRAWL_MAX_PAGES: ${CRAWL_MAX_PAGES:-100}
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "scraper.crawling,scraper.embeddings"]
     depends_on:
       redis:

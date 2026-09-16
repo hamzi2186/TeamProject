@@ -1,3 +1,4 @@
+import heapq
 import re
 import urllib.robotparser
 import xml.etree.ElementTree as ET
@@ -53,6 +54,90 @@ class CrawlResult:
     discovered_count: int = 0
     errors: list[str] = field(default_factory=list)
     partial_reason: str | None = None
+
+
+CORE_PAGE_KEYWORDS = (
+    "about",
+    "bio",
+    "care",
+    "company",
+    "contact",
+    "cost",
+    "direction",
+    "doctor",
+    "faq",
+    "fee",
+    "find-us",
+    "history",
+    "hours",
+    "insurance",
+    "leadership",
+    "location",
+    "mission",
+    "modalit",
+    "office",
+    "offering",
+    "overview",
+    "payment",
+    "plan",
+    "practice",
+    "price",
+    "pricing",
+    "product",
+    "program",
+    "provider",
+    "question",
+    "rate",
+    "service",
+    "solution",
+    "specialt",
+    "staff",
+    "story",
+    "team",
+    "therapist",
+    "therapy",
+    "treatment",
+    "value",
+    "what-we-do",
+    "who-we-are",
+)
+
+DEPRIORITIZED_URL_PATTERNS = (
+    "/page/",
+    "/category/",
+    "/tag/",
+    "/archive/",
+    "/author/",
+    "/topics/",
+)
+
+
+def compute_url_priority(url: str, depth: int, seed_url: str) -> int:
+    parsed = urlsplit(url)
+    clean_path = parsed.path.rstrip("/").casefold()
+    clean_seed = urlsplit(seed_url).path.rstrip("/").casefold()
+    if clean_path == clean_seed or clean_path in {"", "/"}:
+        return 0
+
+    segments = [s for s in clean_path.split("/") if s]
+    # Priority 1: High-value core business and informational pages
+    for seg in segments:
+        for keyword in CORE_PAGE_KEYWORDS:
+            if keyword in seg:
+                return 1
+
+    # Priority 4: Low-value pagination / date archives / tag directories
+    if any(pattern in clean_path for pattern in DEPRIORITIZED_URL_PATTERNS) or re.search(
+        r"/\d{4}(?:/\d{2})?", clean_path
+    ):
+        return 4
+
+    # Priority 2: Direct shallow content pages (depth <= 2 or <= 2 segments)
+    if depth <= 2 and len(segments) <= 2:
+        return 2
+
+    # Priority 3: Deeper informational pages
+    return 3
 
 
 class SafeHTTPFetcher:
@@ -170,13 +255,17 @@ class WebsiteCrawler:
 
         discovered: list[str] = [seed_url]
         discovered.extend(await self._discover_sitemaps(sitemap_urls, origin_host, errors))
-        queue: deque[tuple[str, int]] = deque()
+        queue: list[tuple[int, int, int, str]] = []
         queued: set[str] = set()
+        seq_id = 0
         for url in discovered:
             canonical = canonicalize_crawl_url(url)
             if canonical and canonical not in queued:
                 queued.add(canonical)
-                queue.append((canonical, 0 if canonical == seed_url else 1))
+                depth = 0 if canonical == seed_url else 1
+                priority = compute_url_priority(canonical, depth, seed_url)
+                heapq.heappush(queue, (priority, depth, seq_id, canonical))
+                seq_id += 1
 
         result = CrawlResult(errors=errors)
         visited: set[str] = set()
@@ -186,7 +275,7 @@ class WebsiteCrawler:
             if self._max_pages and len(visited) >= self._max_pages:
                 result.partial_reason = f"Crawl page limit of {self._max_pages} reached"
                 break
-            url, depth = queue.popleft()
+            priority, depth, _, url = heapq.heappop(queue)
             if url in visited or depth > self._max_depth:
                 continue
             visited.add(url)
@@ -229,7 +318,10 @@ class WebsiteCrawler:
                     and link not in queued
                 ):
                     queued.add(link)
-                    queue.append((link, depth + 1))
+                    link_depth = depth + 1
+                    link_priority = compute_url_priority(link, link_depth, seed_url)
+                    heapq.heappush(queue, (link_priority, link_depth, seq_id, link))
+                    seq_id += 1
             if len(extracted.text) < self._minimum_text:
                 result.errors.append(f"{url}: no meaningful content")
                 continue
