@@ -125,13 +125,17 @@ async def process_scrape_job(job_id: UUID) -> None:
                 )
             if not pending:
                 raise CrawlError("No retrieval chunks could be generated")
-            kb = await db.get(KnowledgeBase, job.knowledge_base_id)
+            existing_space = (
+                (kb.embedding_provider, kb.embedding_model, kb.embedding_dimension)
+                if kb and kb.embedding_provider and kb.embedding_model and kb.embedding_dimension
+                else None
+            )
             kb.status = "EMBEDDING" if not previous_ready else "REFRESHING"
             job.chunks_generated = len(pending)
             await db.commit()
 
         vectors: list[list[float]] = []
-        space: tuple[str, str, int] | None = None
+        space: tuple[str, str, int] | None = existing_space
         for start in range(0, len(pending), settings.embedding_batch_size):
             batch = pending[start : start + settings.embedding_batch_size]
             result = await tpi.passages(
@@ -144,7 +148,11 @@ async def process_scrape_job(job_id: UUID) -> None:
             if space is None:
                 space = current
             elif current != space:
-                raise TPIEmbeddingError("Embedding provider changed during indexing")
+                raise TPIEmbeddingError("Embedding space is incompatible with existing knowledge base")
+            if result.provider == "local" and settings.app_env.casefold() == "production":
+                raise TPIEmbeddingError(
+                    "Non-semantic local hash embeddings cannot be used in production"
+                )
             if result.dimension != settings.embedding_storage_dimension:
                 raise TPIEmbeddingError("Embedding dimension does not match vector storage")
             vectors.extend(result.embeddings)

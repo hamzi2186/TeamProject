@@ -89,11 +89,11 @@ async def test_jina_dimension_mismatch_is_rejected():
 
 
 @pytest.mark.asyncio
-async def test_local_fallback_uses_distinct_stable_space():
+async def test_local_provider_uses_distinct_stable_space_when_explicitly_configured():
     local = LocalHashEmbeddingProvider(model="trex-local-hash-v1", dimension=8)
-    service = EmbeddingService({"local": local}, primary="missing", fallback="local")
-    fallback = await service.passages(["stable text"])
-    assert fallback.provider == "local"
+    service = EmbeddingService({"local": local}, primary="local", fallback=None)
+    result = await service.passages(["stable text"])
+    assert result.provider == "local"
     first = await local.embed(
         ["stable text"],
         task=__import__(
@@ -108,6 +108,26 @@ async def test_local_fallback_uses_distinct_stable_space():
     )
     assert first.embeddings == second.embeddings
     assert first.provider == "local"
+
+
+@pytest.mark.asyncio
+async def test_jina_failure_does_not_silently_fallback_to_local():
+    from app.providers.embeddings.errors import EmbeddingUnavailableError
+
+    def failing_handler(_request):
+        return httpx.Response(429, json={"message": "rate limit"})
+
+    jina = jina_provider(failing_handler, dimension=8)
+    local = LocalHashEmbeddingProvider(model="trex-local-hash-v1", dimension=8)
+    # Even if fallback is set to local, primary jina must not silently substitute local hash vectors
+    service = EmbeddingService({"jina": jina, "local": local}, primary="jina", fallback="local")
+    with pytest.raises(EmbeddingRateLimitError):
+        await service.passages(["test"])
+
+    # When Jina provider is not available, must raise EmbeddingUnavailableError instead of substituting local
+    missing_service = EmbeddingService({"local": local}, primary="jina", fallback="local")
+    with pytest.raises(EmbeddingUnavailableError):
+        await missing_service.passages(["test"])
 
 
 class FakeEmbeddingService:

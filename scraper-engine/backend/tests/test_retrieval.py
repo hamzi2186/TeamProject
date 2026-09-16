@@ -122,3 +122,25 @@ async def test_query_dimension_mismatch_is_rejected():
             top_k=6,
             minimum_similarity=None,
         )
+
+
+@pytest.mark.asyncio
+async def test_query_provider_or_model_mismatch_is_rejected():
+    kb = ready_kb()
+    embeddings = FakeEmbeddings(
+        EmbeddingResult(
+            embeddings=[[0.0] * 1024],
+            provider="local",
+            model="trex-local-hash-v1",
+            dimension=1024,
+        )
+    )
+    with pytest.raises(RetrievalDimensionError) as exc:
+        await RetrievalService(FakeDB(kb), embeddings).search(
+            user_id=kb.user_id,
+            knowledge_base_id=kb.id,
+            query="services",
+            top_k=6,
+            minimum_similarity=None,
+        )
+    assert "incompatible" in str(exc.value)

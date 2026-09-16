@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     hubspot_oauth_state_ttl_seconds: int = 600
     hubspot_refresh_skew_seconds: int = 300
     embedding_provider: str = "jina"
-    embedding_fallback_provider: str | None = "local"
+    embedding_fallback_provider: str | None = None
     jina_api_key: str | None = None
     jina_embedding_model: str = "jina-embeddings-v3"
     jina_embedding_dimension: int = 1024

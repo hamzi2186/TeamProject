@@ -68,7 +68,11 @@ class EmbeddingService:
         selected_name = (provider or self._primary).casefold()
         selected = self._providers.get(selected_name)
         if selected is None:
-            if provider or not self._fallback:
+            if (
+                provider
+                or not self._fallback
+                or (selected_name != "local" and self._fallback == "local")
+            ):
                 raise EmbeddingUnavailableError("Requested embedding provider is unavailable")
             selected_name = self._fallback
             selected = self._providers.get(selected_name)
@@ -78,7 +82,12 @@ class EmbeddingService:
         try:
             return await selected.embed(texts, task=task)
         except EmbeddingError:
-            if provider or not self._fallback or self._fallback == selected_name:
+            if (
+                provider
+                or not self._fallback
+                or self._fallback == selected_name
+                or (selected_name != "local" and self._fallback == "local")
+            ):
                 raise
             fallback = self._providers.get(self._fallback)
             if fallback is None:
