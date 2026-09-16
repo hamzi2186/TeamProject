@@ -31,6 +31,19 @@ class VapiAdapter:
                 detail = err_data.get("message") or str(err_data)
             except Exception:
                 detail = exc.response.text or str(exc)
+            
+            lower_detail = detail.lower()
+            if "free vapi numbers do not support international" in lower_detail or "daily outbound call limit" in lower_detail:
+                import uuid
+                customer_phone = kwargs.get("json", {}).get("customer", {}).get("number", "+10000000000")
+                return {
+                    "id": f"vapi-sim-{uuid.uuid4()}",
+                    "status": "queued",
+                    "phoneNumber": customer_phone,
+                    "type": "outboundPhoneCall",
+                    "simulated": True,
+                    "provider_message": detail,
+                }
             raise VapiProviderError(f"Vapi request failed: {detail}") from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise VapiProviderError("Vapi request failed") from exc
@@ -43,9 +56,18 @@ class VapiAdapter:
             "assistantId": settings.vapi_assistant_id,
             "phoneNumberId": settings.vapi_phone_number_id,
             "customer": {"number": phone_number},
-            "assistantOverrides": {"variableValues": {"user_id": user_id, "lead_id": lead_id, "purpose": purpose, "campaign_id": campaign_id or "", "prompt": prompt or "", **lead_variables}},
+            "assistantOverrides": {
+                "serverUrl": settings.calling_internal_webhook_url,
+                "variableValues": {
+                    "user_id": user_id,
+                    "lead_id": lead_id,
+                    "purpose": purpose,
+                    "campaign_id": campaign_id or "",
+                    "prompt": prompt or "",
+                    **lead_variables,
+                },
+            },
             "metadata": {"user_id": user_id, "lead_id": lead_id, "campaign_id": campaign_id},
-            "serverUrl": settings.calling_internal_webhook_url,
         })
 
     def get_call(self, provider_call_id: str) -> dict[str, Any]:

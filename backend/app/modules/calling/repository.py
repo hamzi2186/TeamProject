@@ -25,7 +25,7 @@ def _row_to_record(row: Call) -> CallRecord:
         call_id=str(row.id),
         conversation_id=str(row.conversation_id) if row.conversation_id else None,
         user_id=str(row.user_id),
-        lead_id=row.lead_id,
+        lead_id=str(row.lead_id),
         direction=row.direction,
         from_number=row.from_number,
         to_number=row.to_number,
@@ -54,6 +54,7 @@ class SQLCallRepository:
 
         call_uuid = _uuid.UUID(call.call_id)
         user_uuid = _uuid.UUID(call.user_id)
+        lead_uuid = _uuid.UUID(str(call.lead_id))
         conv_uuid = _uuid.UUID(call.conversation_id) if call.conversation_id else None
 
         existing = await self.db.get(Call, call_uuid)
@@ -61,7 +62,7 @@ class SQLCallRepository:
             row = Call(
                 id=call_uuid,
                 user_id=user_uuid,
-                lead_id=call.lead_id,
+                lead_id=lead_uuid,
                 conversation_id=conv_uuid,
                 campaign_id=None,
                 direction=call.direction,

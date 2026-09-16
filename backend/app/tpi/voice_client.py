@@ -30,6 +30,14 @@ class TPIVoiceClient:
                 response = self.client.request(method, url, headers=headers, timeout=settings.tpi_request_timeout_seconds, **kwargs)
             response.raise_for_status()
             body = response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = ""
+            try:
+                err_data = exc.response.json()
+                detail = err_data.get("detail") or err_data.get("message") or str(err_data)
+            except Exception:
+                detail = exc.response.text or str(exc)
+            raise TPIVoiceError(detail) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise TPIVoiceError("TPI voice service request failed") from exc
         return body.get("data", body) if isinstance(body, dict) else {"data": body}

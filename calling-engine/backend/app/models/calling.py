@@ -40,7 +40,7 @@ class Call(TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
     # References shared leads.id — FK added in migration when leads table exists
-    lead_id: Mapped[str] = mapped_column(Text, nullable=False)
+    lead_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
     # References shared conversations.id if available
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

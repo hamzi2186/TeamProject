@@ -74,6 +74,7 @@ class CallingService:
             provider_call_id=provider_call_id,
             status=CallStatus.QUEUED,
             provider_payload=provider_result,
+            started_at=datetime.now(timezone.utc),
         )
         await self.repository.save(call)
         return {
