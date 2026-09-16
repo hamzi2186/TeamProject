@@ -4,15 +4,23 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app.api.auth import router as auth_router
+from app.api.hubspot import router as hubspot_router
+from app.api.leads import router as leads_router
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from app.db.base import Base
 from app.db.session import SessionLocal, engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: verify DB connectivity
+    settings = get_settings()
     try:
+        if settings.database_url.startswith("sqlite"):
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
         async with SessionLocal() as db:
             await db.execute(text("SELECT 1"))
     except Exception as exc:
@@ -43,6 +51,9 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router, prefix="/api/v1")
+    app.include_router(auth_router)
+    app.include_router(hubspot_router)
+    app.include_router(leads_router)
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:

@@ -8,6 +8,14 @@ export interface ListCallsParams {
   lead_id?: string;
 }
 
+export interface StartCallRequest {
+  lead_id: string;
+  phone_number: string;
+  purpose?: string;
+  campaign_id?: string;
+  lead_variables?: Record<string, string>;
+}
+
 export const callingApi = {
   listCalls: (params: ListCallsParams = {}): Promise<CallsResponse> => {
     const qs = new URLSearchParams();
@@ -20,6 +28,12 @@ export const callingApi = {
 
   getCall: (callId: string): Promise<CallResponse> =>
     apiFetch<CallResponse>(`/api/v1/calling/calls/${callId}`),
+
+  startCall: (request: StartCallRequest) =>
+    apiFetch<{ success: boolean; data: { call_id: string; provider_call_id: string | null; status: string }; error: string | null }>(
+      "/api/v1/calling/calls",
+      { method: "POST", body: JSON.stringify(request) },
+    ),
 
   searchKB: (callId: string, query: string): Promise<{ success: boolean; data: { results: unknown[] } }> =>
     apiFetch(`/api/v1/calling/tools/search-client-kb`, {

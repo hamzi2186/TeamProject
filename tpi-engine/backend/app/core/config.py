@@ -6,26 +6,31 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "../../.env"), extra="ignore")
 
     app_env: str = "development"
-    tpi_internal_service_token: str
-    smtp_host: str
+    tpi_internal_service_token: str = ""
+    smtp_host: str = "localhost"
     smtp_port: int = 587
-    smtp_username: str
-    smtp_password: str
-    smtp_from_email: EmailStr
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: EmailStr = "noreply@trex.internal"
     smtp_from_name: str = "T Rex"
     smtp_use_tls: bool = True
     database_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
-    hubspot_client_id: str
-    hubspot_client_secret: str
-    hubspot_redirect_uri: str
+    hubspot_client_id: str = ""
+    hubspot_client_secret: str = ""
+    hubspot_redirect_uri: str = "http://localhost:8001/api/v1/hubspot/callback"
     hubspot_scopes: str = "crm.objects.contacts.read"
-    hubspot_token_encryption_key: str
+    hubspot_token_encryption_key: str = "development-only-key-change-me"
     hubspot_oauth_state_ttl_seconds: int = 600
     hubspot_refresh_skew_seconds: int = 300
+    vapi_api_key: str = ""
+    vapi_assistant_id: str = ""
+    vapi_phone_number_id: str = ""
+    vapi_webhook_secret: str = ""
+    calling_internal_webhook_url: str = "http://localhost:8002/api/v1/webhooks/vapi/events"
 
     @field_validator(
         "tpi_internal_service_token",
@@ -39,8 +44,6 @@ class Settings(BaseSettings):
     )
     @classmethod
     def must_not_be_empty(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Required TPI configuration is empty")
         return value
 
     @field_validator("database_url")

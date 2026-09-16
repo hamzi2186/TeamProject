@@ -1,12 +1,16 @@
-"""Create calling records and webhook idempotency storage."""
+"""Create calling records and webhook idempotency storage.
+
+Revision ID: 20260916_0004
+Revises: 20260916_0003
+"""
 
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = "20260916_0001"
-down_revision = None
+revision = "20260916_0004"
+down_revision = "20260916_0003"
 branch_labels = None
 depends_on = None
 
@@ -35,6 +39,7 @@ def upgrade() -> None:
         sa.Column("provider_payload", postgresql.JSONB(), nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(["user_id"], ["app_users.id"], ondelete="CASCADE"),
     )
     op.create_index("ix_calls_user_id", "calls", ["user_id"])
     op.create_index("ix_calls_lead_id", "calls", ["lead_id"])

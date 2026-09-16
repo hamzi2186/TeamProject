@@ -1,4 +1,7 @@
 .env
+.secrets/
+**/.secrets/
+Calling agent/
 .venv/
 __pycache__/
 *.py[cod]

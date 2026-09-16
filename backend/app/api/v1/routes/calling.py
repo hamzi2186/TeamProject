@@ -86,11 +86,15 @@ async def search_client_kb(
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
     db: Annotated[AsyncSession, Depends(get_db)] = ...,
 ) -> dict[str, Any]:
-    if not request.call_id:
-        return _ok({"query": request.query, "results": []})
-    return _ok(
-        await _get_service(db).search_client_kb(current_user, request.call_id, request.query)
-    )
+    """Mock KB tool contract for voice assistant (PRD §17.3 / Task §6)."""
+    return _ok({
+        "query": request.query,
+        "call_id": request.call_id,
+        "lead_id": request.lead_id,
+        "results": [],
+        "status": "mock_pending",
+        "message": "Knowledge base pending crawler integration",
+    })
 
 
 # ── Webhook Routes ───────────────────────────────────────────────────────────
