@@ -88,3 +88,26 @@ def create_access_token(user_id: UUID, role: str) -> tuple[str, int]:
     payload = {"sub": str(user_id), "role": role, "type": "access", "iss": settings.auth_issuer, "aud": settings.auth_audience, "iat": now, "exp": expires, "jti": str(uuid4())}
     import jwt as jwt_module
     return jwt_module.encode(payload, private_key, algorithm=settings.auth_jwt_algorithm), int((expires - now).total_seconds())
+
+
+def public_jwk() -> dict:
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    settings = get_settings()
+    _, public_pem = ensure_jwt_keys()
+    key = serialization.load_pem_public_key(public_pem.encode())
+    numbers = key.public_numbers()
+
+    def encode_int(number: int) -> str:
+        raw = number.to_bytes((number.bit_length() + 7) // 8, "big")
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    return {
+        "kty": "RSA",
+        "use": "sig",
+        "kid": "trex-auth-1",
+        "alg": settings.auth_jwt_algorithm,
+        "n": encode_int(numbers.n),
+        "e": encode_int(numbers.e),
+    }
+

@@ -2,7 +2,7 @@ import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { authApi } from "../api/auth";
 
-export function AuthPage({ mode = "login" }: { mode?: "login" | "register" }) {
+export function AuthPage({ mode = "login" }: { mode?: "login" | "register" | "verify" | "forgot" | "reset" }) {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
