@@ -1,6 +1,5 @@
 import { CheckCircle2, Download, ExternalLink, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
 import { HubSpotContact, HubSpotStatus, ImportResult, hubspotApi } from "../api/hubspot";
 
 function readiness(contact: HubSpotContact) {
@@ -9,8 +8,6 @@ function readiness(contact: HubSpotContact) {
 }
 
 export function HubSpotPage() {
-  const location = useLocation();
-  const navigate = useNavigate();
   const [status, setStatus] = useState<HubSpotStatus | null>(null);
   const [contacts, setContacts] = useState<HubSpotContact[]>([]);
   const [nextAfter, setNextAfter] = useState<string | null>(null);
@@ -20,7 +17,6 @@ export function HubSpotPage() {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<ImportResult | null>(null);
-  const [connectionMessage, setConnectionMessage] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -36,18 +32,6 @@ export function HubSpotPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-
-  useEffect(() => {
-    const connected = new URLSearchParams(location.search).get("connected");
-    if (connected === "success") {
-      setConnectionMessage("HubSpot connected successfully.");
-    } else if (connected === "error") {
-      setConnectionMessage("HubSpot connection could not be completed. Please try again.");
-    } else {
-      return;
-    }
-    navigate(location.pathname, { replace: true });
-  }, [location.pathname, location.search, navigate]);
 
   async function connect() {
     setWorking(true); setError("");
@@ -76,7 +60,6 @@ export function HubSpotPage() {
   return (
     <section className="page">
       <header className="page-header"><div><p className="eyebrow dark">Integrations</p><h1>HubSpot</h1><p>Connect your CRM and turn contacts into canonical T Rex leads.</p></div><button className="secondary" onClick={load}><RefreshCw size={16} />Refresh</button></header>
-      {connectionMessage && <div className="notice success" role="status">{connectionMessage}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
       {!status?.connected ? (
         <div className="empty-card"><div className="integration-icon">H</div><h2>HubSpot is not connected</h2><p>Connect your CRM to import leads into T Rex.</p><button className="primary action" disabled={working} onClick={connect}>Connect HubSpot<ExternalLink size={16} /></button></div>

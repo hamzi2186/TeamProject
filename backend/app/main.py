@@ -7,6 +7,8 @@ from sqlalchemy import text
 from app.api.auth import router as auth_router
 from app.api.hubspot import router as hubspot_router
 from app.api.leads import router as leads_router
+from app.api.v1.router import api_router
+from app.api.v1.routes.mailer import router as mailer_router
 from app.core.config import get_settings
 from app.core.keys import ensure_jwt_keys
 from app.core.security import public_jwk
@@ -30,9 +32,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(api_router, prefix="/api/v1")
 app.include_router(auth_router)
 app.include_router(hubspot_router)
 app.include_router(leads_router)
+app.include_router(mailer_router)
 
 
 @app.get("/health")

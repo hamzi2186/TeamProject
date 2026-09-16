@@ -78,6 +78,10 @@ async def register(
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    if get_settings().app_env != "production":
+        user.email_verified_at = datetime.now(UTC)
+        await db.commit()
+        return {"message": "Account created successfully. You can sign in now."}
     await issue_otp(db, user, "verify_email")
     return {"message": "Registration successful. Check your email for the verification code."}
 

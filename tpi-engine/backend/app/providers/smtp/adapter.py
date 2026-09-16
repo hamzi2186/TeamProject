@@ -10,11 +10,7 @@ class SmtpDeliveryError(RuntimeError):
     pass
 
 
-SUBJECTS = {
-    "verify_email": "Verify your T Rex account",
-    "reset_password": "Reset your T Rex password",
-    "smtp_smoke": "T Rex SMTP integration check",
-}
+SUBJECTS = {"verify_email": "Verify your T Rex account", "reset_password": "Reset your T Rex password", "smtp_smoke": "T Rex SMTP integration check"}
 
 
 def _render(template: str, variables: dict[str, str]) -> str:
@@ -22,10 +18,7 @@ def _render(template: str, variables: dict[str, str]) -> str:
         return "T Rex successfully delivered this real SMTP integration check."
     code = variables.get("code", "")
     action = "verify your email" if template == "verify_email" else "reset your password"
-    return (
-        f"Use this six-digit code to {action}: {code}\n\n"
-        "This code expires soon. If you did not request it, you can ignore this email."
-    )
+    return f"Use this six-digit code to {action}: {code}\n\nThis code expires soon. If you did not request it, you can ignore this email."
 
 
 def _send_sync(to: str, template: str, variables: dict[str, str]) -> None:

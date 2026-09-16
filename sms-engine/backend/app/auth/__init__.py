@@ -1,0 +1,1 @@
+"""Shared platform authentication integration."""

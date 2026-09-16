@@ -4,6 +4,11 @@ class HubSpotError(RuntimeError):
     retryable = False
 
 
+class HubSpotConfigurationError(HubSpotError):
+    code = "HUBSPOT_NOT_CONFIGURED"
+    http_status = 503
+
+
 class InvalidOAuthStateError(HubSpotError):
     code = "INVALID_OAUTH_STATE"
     http_status = 400
