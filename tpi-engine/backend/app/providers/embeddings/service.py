@@ -19,10 +19,12 @@ class EmbeddingService:
         *,
         primary: str,
         fallback: str | None,
+        agent_provider: EmbeddingProvider | None = None,
     ) -> None:
         self._providers = providers
         self._primary = primary
         self._fallback = fallback
+        self._agent_provider = agent_provider
 
     async def passages(
         self,
@@ -31,6 +33,7 @@ class EmbeddingService:
         provider: str | None = None,
         model: str | None = None,
         dimension: int | None = None,
+        consumer: str | None = None,
     ) -> EmbeddingResponse:
         return await self._embed(
             texts,
@@ -38,6 +41,7 @@ class EmbeddingService:
             provider=provider,
             model=model,
             dimension=dimension,
+            consumer=consumer,
         )
 
     async def query(
@@ -47,6 +51,7 @@ class EmbeddingService:
         provider: str | None = None,
         model: str | None = None,
         dimension: int | None = None,
+        consumer: str | None = None,
     ) -> EmbeddingResponse:
         return await self._embed(
             [text],
@@ -54,6 +59,7 @@ class EmbeddingService:
             provider=provider,
             model=model,
             dimension=dimension,
+            consumer=consumer,
         )
 
     async def _embed(
@@ -64,24 +70,41 @@ class EmbeddingService:
         provider: str | None,
         model: str | None,
         dimension: int | None,
+        consumer: str | None = None,
     ) -> EmbeddingResponse:
-        selected_name = (provider or self._primary).casefold()
-        selected = self._providers.get(selected_name)
-        if selected is None:
-            if (
-                provider
-                or not self._fallback
-                or (selected_name != "local" and self._fallback == "local")
-            ):
-                raise EmbeddingUnavailableError("Requested embedding provider is unavailable")
-            selected_name = self._fallback
+        is_agent = (consumer or "").casefold() == "agent"
+        if is_agent:
+            if provider and provider.casefold() not in {"agent-jina", "agent"}:
+                selected = self._providers.get(provider.casefold())
+                if selected is None:
+                    raise EmbeddingUnavailableError(
+                        f"Requested embedding provider '{provider}' is unavailable for agent"
+                    )
+            else:
+                if self._agent_provider is None:
+                    raise EmbeddingUnavailableError("Agent embedding provider is not configured")
+                selected = self._agent_provider
+        else:
+            selected_name = (provider or self._primary).casefold()
             selected = self._providers.get(selected_name)
             if selected is None:
-                raise EmbeddingUnavailableError("Requested embedding provider is unavailable")
+                if (
+                    provider
+                    or not self._fallback
+                    or (selected_name != "local" and self._fallback == "local")
+                ):
+                    raise EmbeddingUnavailableError("Requested embedding provider is unavailable")
+                selected_name = self._fallback
+                selected = self._providers.get(selected_name)
+                if selected is None:
+                    raise EmbeddingUnavailableError("Requested embedding provider is unavailable")
+
         self._validate_space(selected, model=model, dimension=dimension)
         try:
             return await selected.embed(texts, task=task)
         except EmbeddingError:
+            if is_agent:
+                raise
             if (
                 provider
                 or not self._fallback
@@ -120,8 +143,18 @@ def get_embedding_service() -> EmbeddingService:
             dimension=settings.jina_embedding_dimension,
             timeout_seconds=settings.embedding_timeout_seconds,
         )
+    agent_provider: EmbeddingProvider | None = None
+    if settings.agent_jina_api_key:
+        agent_provider = JinaEmbeddingProvider(
+            api_key=settings.agent_jina_api_key,
+            model=settings.agent_jina_embedding_model,
+            dimension=settings.agent_jina_embedding_dimension,
+            timeout_seconds=settings.embedding_timeout_seconds,
+        )
+        providers["agent-jina"] = agent_provider
     return EmbeddingService(
         providers,
         primary=settings.embedding_provider,
         fallback=settings.embedding_fallback_provider,
+        agent_provider=agent_provider,
     )

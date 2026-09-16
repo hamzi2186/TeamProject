@@ -3,6 +3,7 @@
 Revision ID: 20260916_0001
 Revises:
 """
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
