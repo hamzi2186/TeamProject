@@ -10,21 +10,21 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     frontend_url: str = "http://localhost:5173"
-    tpi_internal_service_token: str
-    smtp_host: str
+    tpi_internal_service_token: str = "dev-internal-service-token"
+    smtp_host: str = "localhost"
     smtp_port: int = 587
-    smtp_username: str
-    smtp_password: str
-    smtp_from_email: EmailStr
+    smtp_username: str = "dev-user"
+    smtp_password: str = "dev-password"
+    smtp_from_email: EmailStr = "noreply@trexmail.io"
     smtp_from_name: str = "T Rex"
     smtp_use_tls: bool = True
-    database_url: str | None = None
+    database_url: str | None = "postgresql+asyncpg://postgres:postgres@localhost:5432/trex_tpi_dev"
     redis_url: str = "redis://localhost:6379/0"
-    hubspot_client_id: str
-    hubspot_client_secret: str
-    hubspot_redirect_uri: str
+    hubspot_client_id: str = "dev-client-id"
+    hubspot_client_secret: str = "dev-client-secret"
+    hubspot_redirect_uri: str = "http://localhost:5173/hubspot/callback"
     hubspot_scopes: str = "crm.objects.contacts.read"
-    hubspot_token_encryption_key: str
+    hubspot_token_encryption_key: str = "xqgJdRdX6YxO3mVQn5pRj0jT1N0Qx7kQk3P4sL7pS8I="
     hubspot_oauth_state_ttl_seconds: int = 600
     hubspot_refresh_skew_seconds: int = 300
 
