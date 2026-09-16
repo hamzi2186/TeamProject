@@ -1,70 +1,128 @@
-# T Rex Phase 1 Foundation
+# T Rex — Calling Engine
 
-Phase 1 provides shared first-party authentication, a real Supabase PostgreSQL/Alembic foundation, Redis/Celery, the root auth frontend, and the internal TPI SMTP adapter. It does not use Supabase Auth, and root Auth never connects to SMTP directly.
+Outbound and inbound AI voice call management for the T Rex platform.
 
-## Local configuration
+## Architecture
 
-The existing gitignored files are authoritative for this development checkout:
-
-- `backend/.env`: Supabase Session Pooler database URL, Redis URL, and TPI internal settings.
-- `tpi-engine/backend/.env`: real SMTP settings and the matching internal service token.
-
-Never commit either file. Examples intentionally contain no credential values. RS256 keys are generated on first backend start under the gitignored `backend/.secrets/` directory.
-
-## Integrated runtime
-
-```powershell
-docker compose build
-docker compose up -d redis tpi backend worker frontend
-docker compose ps
+```
+Campaign Scheduler (root platform)
+    |
+    v (Celery task: calling.start_outbound_call)
+Calling Engine Backend  :8002
+    |
+    v (HTTP + X-TPI-Service-Token)
+TPI Engine  :8001
+    |
+    v (HTTPS)
+Vapi API
+    |
+    v (phone call + webhooks back through TPI)
+Lead
 ```
 
-Endpoints:
+**The Calling Engine never calls Vapi directly.** All voice provider operations go through the TPI Engine per the T Rex architecture.
 
-- Root frontend: `http://localhost:5173`
-- Root backend health: `http://localhost:8000/health`
-- Real database health: `http://localhost:8000/health/db`
-- TPI health: `http://localhost:8001/health`
+## Quick Start (standalone dev)
 
-Run the migration explicitly when needed:
+### Prerequisites
 
-```powershell
-docker compose run --rm backend alembic upgrade head
-```
+- Python 3.12+
+- Node.js 20+
+- PostgreSQL (shared with root platform)
+- Redis
+- TPI Engine running on port 8001
 
-Verify the database and real SMTP delivery:
-
-```powershell
-python scripts/verify_database.py
-python scripts/smtp_smoke_test.py
-```
-
-The SMTP check sends through `TPI API -> configured SMTP server` to the configured sender mailbox. It does not print the address or credentials.
-
-## Interactive authentication smoke test
-
-With the services running:
+### 1. Configure environment
 
 ```powershell
-python scripts/auth_smoke_test.py
+Copy-Item .env.example .env
+# Edit .env with your database URL, TPI token, and auth public key
 ```
 
-Use an email address you can access. The script performs:
+### 2. Copy auth public key
 
-```text
-register -> real database user -> TPI/SMTP OTP -> human OTP entry
-         -> verify -> login -> /auth/me -> refresh rotation -> logout
-```
-
-The OTP is entered interactively and is not stored in source or written to disk.
-
-## Development checks
+The Calling Engine needs the public key from the root platform to verify JWTs:
 
 ```powershell
-python -m pip install -r backend/requirements-dev.txt
-python -m pytest backend/tests
-python -m ruff check backend/app backend/tests tpi-engine/backend/app scripts
+New-Item -ItemType Directory -Force .secrets
+# Copy auth_public.pem from root platform's .secrets/ directory
+Copy-Item ..\TeamProjectRepo\.secrets\auth_public.pem .secrets\
+```
+
+### 3. Run migrations
+
+```powershell
+cd backend
+pip install -r requirements.txt
+alembic upgrade head
+```
+
+### 4. Start backend
+
+```powershell
+uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+```
+
+### 5. Start worker
+
+```powershell
+celery -A app.workers.celery_app:celery_app worker --loglevel=INFO -Q calling.calls
+```
+
+### 6. Start frontend
+
+```powershell
 cd frontend
 npm install
-npm run build
+npm run dev
+# Opens at http://localhost:5174/calling
+```
+
+## Docker (integrated)
+
+This engine is part of the root platform `docker-compose.yml`. Add the calling services to the root compose:
+
+```powershell
+# From root platform directory
+docker compose up --build calling-backend calling-worker calling-frontend
+```
+
+## API Endpoints
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | None | Liveness check |
+| GET | `/health/db` | None | DB connectivity |
+| GET | `/api/v1/calling/calls` | Bearer JWT | List calls |
+| GET | `/api/v1/calling/calls/{call_id}` | Bearer JWT | Get call |
+| POST | `/api/v1/calling/tools/search-client-kb` | Bearer JWT | KB tool |
+| POST | `/api/v1/webhooks/vapi/events` | Internal | TPI → engine webhook |
+
+## Frontend Routes
+
+| Path | Description |
+|---|---|
+| `/calling` | Call list with filters |
+| `/calling/:callId` | Call detail (transcript, summary, outcome) |
+
+## Auth
+
+The Calling Engine is a **token consumer**. It verifies RS256 JWTs issued by the shared root platform. It never issues tokens or manages users.
+
+The frontend reads `trex_access_token` from `sessionStorage` (set by the root auth flow).
+
+## Environment Variables
+
+See [`.env.example`](.env.example) for all required variables.
+
+## Agent Knowledge
+
+This engine maintains documentation for the T Rex Assistant (Agent Engine) in:
+
+```
+docs/agent-knowledge/calling/
+├── overview.md
+├── workflow.md
+├── usage.md
+└── faq.md
 ```

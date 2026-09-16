@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.providers.hubspot.client import HubSpotClient
 from app.providers.hubspot.crypto import TokenCipher
 from app.providers.hubspot.errors import (
+    HubSpotConfigurationError,
     ConnectionNotFoundError,
     ConnectionRevokedError,
     HubSpotError,
@@ -53,6 +54,8 @@ class HubSpotService:
         self._refresh_skew = timedelta(seconds=refresh_skew_seconds)
 
     async def create_authorization_url(self, user_id: UUID) -> ConnectResponse:
+        if not self._client_id or self._client_id.startswith("replace-"):
+            raise HubSpotConfigurationError("HubSpot OAuth credentials are not configured in the shared .env file")
         state = await self._state_store.create(user_id)
         return ConnectResponse(
             authorization_url=build_authorization_url(

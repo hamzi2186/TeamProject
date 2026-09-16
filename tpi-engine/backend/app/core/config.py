@@ -13,7 +13,7 @@ class TwilioNumberRoute(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "../../.env"), extra="ignore")
 
     app_env: str = "development"
     frontend_url: str = "http://localhost:5173"
@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     sms_provider: Literal["twilio", "mock"] = "twilio"
     mock_sms_from_number: str = "+15555550100"
 
+    # Vapi (Calling Engine)
+    vapi_api_key: str = ""
+    vapi_assistant_id: str = ""
+    vapi_phone_number_id: str = ""
+    vapi_webhook_secret: str = ""
+    calling_internal_webhook_url: str = "http://backend:8000/api/v1/webhooks/vapi/events"
+
     @field_validator(
         "tpi_internal_service_token",
         "smtp_host",
@@ -106,6 +113,10 @@ class Settings(BaseSettings):
     @property
     def twilio_configured(self) -> bool:
         return bool(self.twilio_account_sid and self.twilio_auth_token)
+
+    @property
+    def vapi_configured(self) -> bool:
+        return bool(self.vapi_api_key)
 
 
 @lru_cache
