@@ -1,0 +1,32 @@
+services:
+  calling-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trex-calling-backend
+    ports:
+      - "8002:8002"
+    environment:
+      APP_ENV: development
+      FRONTEND_URL: http://localhost:5174
+      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:///./calling-engine.db}
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://localhost:8001}
+      TPI_INTERNAL_SERVICE_TOKEN: ${TPI_INTERNAL_SERVICE_TOKEN:-}
+      CALLING_INTERNAL_WEBHOOK_URL: http://calling-backend:8002/api/v1/webhooks/vapi/events
+    volumes:
+      - ./backend:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  calling-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: trex-calling-frontend
+    ports:
+      - "5174:5174"
+    depends_on:
+      - calling-backend
