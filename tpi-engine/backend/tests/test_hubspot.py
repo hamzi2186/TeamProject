@@ -14,6 +14,7 @@ from app.providers.hubspot.client import CONTACTS_URL, TOKEN_URL, HubSpotClient
 from app.providers.hubspot.crypto import TokenCipher
 from app.providers.hubspot.errors import (
     InvalidOAuthStateError,
+    OAuthDeniedError,
     ProviderAuthError,
     ProviderRateLimitError,
     ProviderTemporaryError,
@@ -298,4 +299,64 @@ def test_internal_authentication_and_api_responses_exclude_tokens(monkeypatch):
     assert "access_token" not in serialized
     assert "refresh_token" not in serialized
     assert "client_secret" not in serialized
+    app.dependency_overrides.clear()
+
+
+def test_oauth_callback_redirects_to_configured_frontend_without_sensitive_query_values(
+    monkeypatch,
+):
+    import app.api.hubspot as hubspot_api
+
+    callback_path = next(
+        route.path for route in app.routes if route.endpoint is hubspot_api.callback
+    )
+    monkeypatch.setattr(
+        hubspot_api,
+        "get_settings",
+        lambda: SimpleNamespace(frontend_url="https://frontend.example.test"),
+    )
+    app.dependency_overrides[get_hubspot_service] = lambda: FakeApiService()
+    client = TestClient(app)
+    response = client.get(
+        callback_path,
+        params={"state": "opaque-state", "code": "opaque-code"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    location = response.headers["location"]
+    parsed = urlparse(location)
+    assert parsed.scheme == "https"
+    assert parsed.netloc == "frontend.example.test"
+    assert parsed.path == "/hubspot"
+    assert parse_qs(parsed.query) == {"connected": ["success"]}
+    assert "code" not in location and "state" not in location
+    app.dependency_overrides.clear()
+
+
+def test_oauth_callback_redirects_denial_to_safe_frontend_error(monkeypatch):
+    import app.api.hubspot as hubspot_api
+
+    class DeniedService(FakeApiService):
+        async def complete_oauth(self, **_kwargs):
+            raise OAuthDeniedError("provider details must not reach browser")
+
+    callback_path = next(
+        route.path for route in app.routes if route.endpoint is hubspot_api.callback
+    )
+    monkeypatch.setattr(
+        hubspot_api,
+        "get_settings",
+        lambda: SimpleNamespace(frontend_url="http://localhost:5173"),
+    )
+    app.dependency_overrides[get_hubspot_service] = lambda: DeniedService()
+    response = TestClient(app).get(
+        callback_path,
+        params={"state": "opaque-state", "error": "access_denied"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert parse_qs(urlparse(location).query) == {"connected": ["error"]}
+    assert "provider details" not in location
+    assert "access_denied" not in location
     app.dependency_overrides.clear()

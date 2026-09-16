@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_env: str = "development"
+    frontend_url: str = "http://localhost:5173"
     tpi_internal_service_token: str
     smtp_host: str
     smtp_port: int = 587

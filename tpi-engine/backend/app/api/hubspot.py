@@ -2,11 +2,12 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse
 
 from app.api.dependencies import require_service_token
+from app.core.config import get_settings
 from app.providers.hubspot.errors import HubSpotError
 from app.providers.hubspot.schemas import (
-    CallbackResponse,
     ConnectionStatusResponse,
     ConnectRequest,
     ConnectResponse,
@@ -68,8 +69,21 @@ async def callback(
     service: Annotated[HubSpotService, Depends(get_hubspot_service)],
     code: str | None = None,
     error: str | None = None,
-) -> CallbackResponse:
+) -> RedirectResponse:
+    frontend_url = f"{get_settings().frontend_url.rstrip('/')}/hubspot"
     try:
-        return await service.complete_oauth(state=state, code=code, provider_error=error)
-    except HubSpotError as exc:
-        raise provider_error(exc) from exc
+        await service.complete_oauth(state=state, code=code, provider_error=error)
+        return RedirectResponse(
+            url=f"{frontend_url}?connected=success",
+            status_code=303,
+        )
+    except HubSpotError:
+        return RedirectResponse(
+            url=f"{frontend_url}?connected=error",
+            status_code=303,
+        )
+    except Exception:
+        return RedirectResponse(
+            url=f"{frontend_url}?connected=error",
+            status_code=303,
+        )
