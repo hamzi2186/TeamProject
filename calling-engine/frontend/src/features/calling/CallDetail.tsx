@@ -1,44 +1,53 @@
 import { useQuery } from "@tanstack/react-query";
-import { Clock, Mic, Phone, FileText, ChevronLeft } from "lucide-react";
+import {
+  Phone, ChevronLeft, Clock, Mic, FileText,
+  Hash, ArrowUpDown, Wifi, AlertCircle,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { callingApi, callingKeys } from "../../api/calling";
 import { CallBadge } from "./CallBadge";
 
-function formatDate(value: string | null): string {
-  if (!value) return "—";
+function fmtDate(v: string | null): string {
+  if (!v) return "—";
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(value));
+  }).format(new Date(v));
 }
 
-function formatDuration(value: number | null): string {
-  if (value == null) return "—";
-  const m = Math.floor(value / 60);
-  const s = String(value % 60).padStart(2, "0");
+function fmtDuration(v: number | null): string {
+  if (v == null) return "—";
+  const m = Math.floor(v / 60);
+  const s = String(v % 60).padStart(2, "0");
   return `${m}m ${s}s`;
 }
 
 export function CallDetail({ callId }: { callId: string }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: callingKeys.detail(callId),
-    queryFn: () => callingApi.getCall(callId),
+    queryFn:  () => callingApi.getCall(callId),
     retry: 1,
   });
 
+  /* ── Loading ──────────────────────────────────────────────────────── */
   if (isLoading) {
     return (
       <div className="detail-loading">
         <div className="skeleton skeleton--title" />
+        <div className="skeleton skeleton--body" style={{ width: "60%" }} />
+        <div style={{ height: 12 }} />
         <div className="skeleton skeleton--body" />
         <div className="skeleton skeleton--body" />
+        <div className="skeleton skeleton--body" style={{ width: "80%" }} />
       </div>
     );
   }
 
+  /* ── Error ────────────────────────────────────────────────────────── */
   if (isError || !data?.data) {
     return (
       <div className="detail-error">
+        <AlertCircle size={28} style={{ color: "var(--tx-lo)" }} />
         <p>Call record not found or you do not have access.</p>
         <Link to="/calling" className="btn-secondary">← Back to calls</Link>
       </div>
@@ -46,104 +55,214 @@ export function CallDetail({ callId }: { callId: string }) {
   }
 
   const call = data.data;
+  const isLive = ["QUEUED", "RINGING", "IN_PROGRESS"].includes(call.status);
 
   return (
-    <div className="call-detail">
-      {/* Header */}
-      <div className="call-detail__header">
-        <Link to="/calling" className="back-link">
-          <ChevronLeft size={16} />
-          All Calls
-        </Link>
-        <div className="call-detail__title-row">
-          <div className="call-detail__icon">
-            <Phone size={18} />
+    <>
+      {/* ── Back ────────────────────────────────────────────────────── */}
+      <Link to="/calling" className="back-btn">
+        <ChevronLeft size={15} />
+        All Calls
+      </Link>
+
+      <div className="detail-layout">
+        {/* ── Main column ─────────────────────────────────────────── */}
+        <div>
+          {/* Hero card */}
+          <div className="detail-hero">
+            <div className="detail-hero-top">
+              <div className="detail-hero-id">
+                <div className="detail-hero-icon">
+                  <Phone size={20} />
+                </div>
+                <div>
+                  <div className="detail-hero-name">{call.lead_id}</div>
+                  <div className="detail-hero-sub">
+                    <span>{call.to_number ?? call.from_number ?? "Unknown number"}</span>
+                    <span className="detail-hero-sep">·</span>
+                    <span>{call.direction === "OUTBOUND" ? "Outbound" : "Inbound"}</span>
+                    <span className="detail-hero-sep">·</span>
+                    <span>{call.provider.toUpperCase()}</span>
+                  </div>
+                </div>
+              </div>
+              <CallBadge value={call.status} />
+            </div>
+
+            {/* Status strip */}
+            <div className="detail-status-strip">
+              <div className="detail-stat">
+                <span className="detail-stat-label">Outcome</span>
+                <span className="detail-stat-value"><CallBadge value={call.outcome} /></span>
+              </div>
+              <div className="detail-stat">
+                <span className="detail-stat-label">Duration</span>
+                <span className="detail-stat-value">
+                  <Clock size={13} style={{ color: "var(--tx-lo)" }} />
+                  {fmtDuration(call.duration_seconds)}
+                </span>
+              </div>
+              <div className="detail-stat">
+                <span className="detail-stat-label">Started</span>
+                <span className="detail-stat-value">{fmtDate(call.started_at)}</span>
+              </div>
+              <div className="detail-stat">
+                <span className="detail-stat-label">Ended</span>
+                <span className="detail-stat-value">{fmtDate(call.ended_at)}</span>
+              </div>
+              <div className="detail-stat">
+                <span className="detail-stat-label">Direction</span>
+                <span className="detail-stat-value">
+                  <ArrowUpDown size={13} style={{ color: "var(--tx-lo)" }} />
+                  {call.direction === "OUTBOUND" ? "Outbound" : "Inbound"}
+                </span>
+              </div>
+            </div>
           </div>
-          <div>
-            <h1 className="call-detail__lead">{call.lead_id}</h1>
-            <p className="call-detail__sub">
-              {call.to_number ?? call.from_number ?? "Unknown number"} ·{" "}
-              {call.direction === "OUTBOUND" ? "Outbound" : "Inbound"} ·{" "}
-              {call.provider.toUpperCase()}
-            </p>
+
+          {/* Summary */}
+          {call.summary && (
+            <div className="detail-section">
+              <div className="detail-section-head">
+                <FileText size={14} />
+                AI Summary
+              </div>
+              <div className="detail-section-body">
+                <p className="summary-text">{call.summary}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Recording */}
+          {call.recording_url && (
+            <div className="detail-section">
+              <div className="detail-section-head">
+                <Mic size={14} />
+                Recording
+              </div>
+              <div className="detail-section-body">
+                <audio controls src={call.recording_url} className="audio-player" />
+              </div>
+            </div>
+          )}
+
+          {/* Transcript */}
+          <div className="detail-section">
+            <div className="detail-section-head">
+              <FileText size={14} />
+              Transcript
+              {isLive && (
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--tx-lo)" }}>
+                  Call in progress…
+                </span>
+              )}
+            </div>
+            <div className="detail-section-body">
+              {call.transcript ? (
+                <div className="transcript-wrap">
+                  <pre className="transcript-text">{call.transcript}</pre>
+                </div>
+              ) : (
+                <p className="transcript-empty">
+                  {isLive
+                    ? "Transcript will appear after the call completes."
+                    : "No transcript available for this call."}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Sidebar column ──────────────────────────────────────── */}
+        <div>
+          {/* Call info */}
+          <div className="detail-sidebar-card">
+            <div className="detail-sidebar-head">
+              <Hash size={13} />
+              Call Information
+            </div>
+            <div className="detail-sidebar-body">
+              <div className="meta-list">
+                <div className="meta-row">
+                  <span className="meta-label">From</span>
+                  <span className="meta-value">{call.from_number ?? "—"}</span>
+                </div>
+                <div className="meta-row">
+                  <span className="meta-label">To</span>
+                  <span className="meta-value">{call.to_number ?? "—"}</span>
+                </div>
+                <div className="meta-row">
+                  <span className="meta-label">Provider</span>
+                  <span className="meta-value">
+                    <Wifi size={13} style={{ color: "var(--tx-lo)" }} />
+                    {call.provider.toUpperCase()}
+                  </span>
+                </div>
+                <div className="meta-row">
+                  <span className="meta-label">Status</span>
+                  <span className="meta-value"><CallBadge value={call.status} /></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* IDs */}
+          <div className="detail-sidebar-card">
+            <div className="detail-sidebar-head">
+              <Hash size={13} />
+              Identifiers
+            </div>
+            <div className="detail-sidebar-body">
+              <div className="meta-list">
+                <div className="meta-row">
+                  <span className="meta-label">Call ID</span>
+                  <span className="meta-value"><code>{call.call_id}</code></span>
+                </div>
+                {call.conversation_id && (
+                  <div className="meta-row">
+                    <span className="meta-label">Conversation ID</span>
+                    <span className="meta-value"><code>{call.conversation_id}</code></span>
+                  </div>
+                )}
+                <div className="meta-row">
+                  <span className="meta-label">Lead ID</span>
+                  <span className="meta-value"><code>{call.lead_id}</code></span>
+                </div>
+                <div className="meta-row">
+                  <span className="meta-label">Provider Call ID</span>
+                  <span className="meta-value">
+                    <code>{call.provider_call_id ?? "—"}</code>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Timeline */}
+          <div className="detail-sidebar-card">
+            <div className="detail-sidebar-head">
+              <Clock size={13} />
+              Timeline
+            </div>
+            <div className="detail-sidebar-body">
+              <div className="meta-list">
+                <div className="meta-row">
+                  <span className="meta-label">Started</span>
+                  <span className="meta-value" style={{ fontSize: 12.5 }}>{fmtDate(call.started_at)}</span>
+                </div>
+                <div className="meta-row">
+                  <span className="meta-label">Ended</span>
+                  <span className="meta-value" style={{ fontSize: 12.5 }}>{fmtDate(call.ended_at)}</span>
+                </div>
+                <div className="meta-row">
+                  <span className="meta-label">Duration</span>
+                  <span className="meta-value">{fmtDuration(call.duration_seconds)}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-
-      {/* Status row */}
-      <div className="call-detail__status-bar">
-        <div className="status-item">
-          <span className="status-label">Status</span>
-          <CallBadge value={call.status} />
-        </div>
-        <div className="status-item">
-          <span className="status-label">Outcome</span>
-          <CallBadge value={call.outcome} />
-        </div>
-        <div className="status-item">
-          <span className="status-label">Duration</span>
-          <span className="status-value">{formatDuration(call.duration_seconds)}</span>
-        </div>
-        <div className="status-item">
-          <span className="status-label">Started</span>
-          <span className="status-value">{formatDate(call.started_at)}</span>
-        </div>
-        <div className="status-item">
-          <span className="status-label">Ended</span>
-          <span className="status-value">{formatDate(call.ended_at)}</span>
-        </div>
-      </div>
-
-      {/* Summary */}
-      {call.summary && (
-        <section className="call-detail__section">
-          <div className="section-header">
-            <FileText size={15} />
-            <h2>Summary</h2>
-          </div>
-          <div className="call-detail__summary">{call.summary}</div>
-        </section>
-      )}
-
-      {/* Recording */}
-      {call.recording_url && (
-        <section className="call-detail__section">
-          <div className="section-header">
-            <Mic size={15} />
-            <h2>Recording</h2>
-          </div>
-          <audio controls src={call.recording_url} className="call-detail__audio" />
-        </section>
-      )}
-
-      {/* Transcript */}
-      <section className="call-detail__section">
-        <div className="section-header">
-          <Clock size={15} />
-          <h2>Transcript</h2>
-        </div>
-        {call.transcript ? (
-          <pre className="call-detail__transcript">{call.transcript}</pre>
-        ) : (
-          <p className="muted">
-            {["QUEUED", "RINGING", "IN_PROGRESS"].includes(call.status)
-              ? "Call is in progress — transcript will appear after completion."
-              : "No transcript available for this call."}
-          </p>
-        )}
-      </section>
-
-      {/* IDs */}
-      <section className="call-detail__section call-detail__ids">
-        <dl>
-          <dt>Call ID</dt>
-          <dd><code>{call.call_id}</code></dd>
-          <dt>Provider Call ID</dt>
-          <dd><code>{call.provider_call_id ?? "—"}</code></dd>
-          <dt>Lead ID</dt>
-          <dd><code>{call.lead_id}</code></dd>
-        </dl>
-      </section>
-    </div>
+    </>
   );
 }

@@ -1,23 +1,24 @@
 import { type ReactNode, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { isAuthenticated } from "./auth";
 
-const ROOT_AUTH_URL = import.meta.env.VITE_ROOT_AUTH_URL ?? "http://localhost:5173/auth/login";
-
 /**
- * AuthGuard redirects to the shared root auth service if no valid token exists.
- * The root platform (feat/foundation-auth-docker) owns auth — this engine is a consumer.
+ * Protects a route — redirects to the calling engine's own login page
+ * if no valid access token exists in sessionStorage.
  */
 export function AuthGuard({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
+
   useEffect(() => {
     if (!isAuthenticated()) {
-      window.location.href = ROOT_AUTH_URL;
+      navigate("/auth/login", { replace: true });
     }
-  }, []);
+  }, [navigate]);
 
   if (!isAuthenticated()) {
     return (
       <div className="auth-redirect">
-        <p>Redirecting to sign in…</p>
+        <p>Redirecting…</p>
       </div>
     );
   }

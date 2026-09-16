@@ -5,12 +5,12 @@ export function CallDetailPage() {
   const { callId } = useParams<{ callId: string }>();
 
   if (!callId) {
-    return <div className="page"><p>Invalid call ID.</p></div>;
+    return (
+      <div style={{ padding: 32, color: "var(--tx-lo)", fontSize: 14 }}>
+        Invalid call ID.
+      </div>
+    );
   }
 
-  return (
-    <div className="page">
-      <CallDetail callId={callId} />
-    </div>
-  );
+  return <CallDetail callId={callId} />;
 }
