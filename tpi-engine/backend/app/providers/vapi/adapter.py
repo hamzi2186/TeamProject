@@ -24,6 +24,14 @@ class VapiAdapter:
             )
             response.raise_for_status()
             return response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = ""
+            try:
+                err_data = exc.response.json()
+                detail = err_data.get("message") or str(err_data)
+            except Exception:
+                detail = exc.response.text or str(exc)
+            raise VapiProviderError(f"Vapi request failed: {detail}") from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise VapiProviderError("Vapi request failed") from exc
 
