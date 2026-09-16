@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     hubspot_token_encryption_key: str
     hubspot_oauth_state_ttl_seconds: int = 600
     hubspot_refresh_skew_seconds: int = 300
+    embedding_provider: str = "jina"
+    embedding_fallback_provider: str | None = "local"
+    jina_api_key: str | None = None
+    jina_embedding_model: str = "jina-embeddings-v3"
+    jina_embedding_dimension: int = 1024
+    local_embedding_model: str = "trex-local-hash-v1"
+    local_embedding_dimension: int = 1024
+    embedding_timeout_seconds: float = 30
 
     @field_validator(
         "tpi_internal_service_token",

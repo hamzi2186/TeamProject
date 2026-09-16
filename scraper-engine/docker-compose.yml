@@ -1,0 +1,40 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - scraper_redis:/data
+
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8002:8002"
+    depends_on:
+      - redis
+
+  worker:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "scraper.crawling,scraper.embeddings"]
+    depends_on:
+      - redis
+      - backend
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_SCRAPER_API_BASE_URL: http://localhost:8002
+        VITE_PLATFORM_FRONTEND_URL: http://localhost:5173
+    ports:
+      - "5174:80"
+    depends_on:
+      - backend
+
+volumes:
+  scraper_redis:
