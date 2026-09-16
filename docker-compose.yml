@@ -34,6 +34,7 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       TPI_API_BASE_URL: http://tpi:8001
+      SCRAPER_API_BASE_URL: http://scraper-backend:8002
       AUTH_JWT_PRIVATE_KEY_PATH: /app/.secrets/auth_private.pem
       AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
     command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
@@ -79,6 +80,63 @@ services:
       - "5173:80"
     depends_on:
       backend:
+        condition: service_healthy
+
+  scraper-backend:
+    build: ./scraper-engine/backend
+    env_file:
+      - ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      TPI_API_BASE_URL: http://tpi:8001
+      AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
+      FRONTEND_ORIGINS: http://localhost:5174,http://localhost:5173
+      SCRAPER_INTERNAL_SERVICE_TOKEN: ${SCRAPER_INTERNAL_SERVICE_TOKEN:-local-scraper-service-token}
+    ports:
+      - "8002:8002"
+    depends_on:
+      redis:
+        condition: service_healthy
+      tpi:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/db')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  scraper-worker:
+    build: ./scraper-engine/backend
+    env_file:
+      - ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      TPI_API_BASE_URL: http://tpi:8001
+      AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
+      SCRAPER_INTERNAL_SERVICE_TOKEN: ${SCRAPER_INTERNAL_SERVICE_TOKEN:-local-scraper-service-token}
+      IS_CELERY_WORKER: "true"
+      CRAWL_MAX_PAGES: ${CRAWL_MAX_PAGES:-100}
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "scraper.crawling,scraper.embeddings"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      tpi:
+        condition: service_healthy
+      scraper-backend:
+        condition: service_healthy
+
+  scraper-frontend:
+    build:
+      context: ./scraper-engine/frontend
+      args:
+        VITE_SCRAPER_API_BASE_URL: http://localhost:8002
+        VITE_PLATFORM_FRONTEND_URL: http://localhost:5173
+    ports:
+      - "5174:80"
+    depends_on:
+      scraper-backend:
         condition: service_healthy
 
 volumes:

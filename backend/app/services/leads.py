@@ -130,3 +130,16 @@ class LeadRepository:
         await self._db.commit()
         await self._db.refresh(lead)
         return lead
+
+    async def set_lead_website(
+        self, user_id: UUID, lead_id: UUID, website_id: UUID, website_url: str | None = None
+    ) -> Lead | None:
+        lead = await self.get_for_user(user_id, lead_id)
+        if lead is None:
+            return None
+        lead.website_id = website_id
+        if website_url:
+            lead.website_url = website_url
+        await self._db.commit()
+        await self._db.refresh(lead)
+        return lead
