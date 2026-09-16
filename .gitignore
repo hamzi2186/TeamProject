@@ -16,3 +16,10 @@ node_modules/
 dist/
 **/dist/
 *.tsbuildinfo
+*credentials*.txt
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.docx
+!**/.gitkeep
