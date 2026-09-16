@@ -3,96 +3,111 @@ import { Link } from "react-router-dom";
 import type { Call } from "../../types/calling";
 import { CallBadge } from "./CallBadge";
 
-function formatDate(value: string | null): string {
-  if (!value) return "—";
+function fmtDate(v: string | null): string {
+  if (!v) return "—";
   return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
+    month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit",
+  }).format(new Date(v));
 }
 
-function formatDuration(value: number | null): string {
-  if (value == null) return "—";
-  const m = Math.floor(value / 60);
-  const s = String(value % 60).padStart(2, "0");
+function fmtDuration(v: number | null): string {
+  if (v == null) return "—";
+  const m = Math.floor(v / 60);
+  const s = String(v % 60).padStart(2, "0");
   return `${m}m ${s}s`;
 }
 
-interface CallTableProps {
+interface Props {
   calls: Call[];
   isRefetching?: boolean;
 }
 
-export function CallTable({ calls, isRefetching }: CallTableProps) {
+export function CallTable({ calls, isRefetching }: Props) {
   if (!calls.length) {
     return (
       <div className="empty-state">
-        <Phone size={28} className="empty-state__icon" />
-        <strong>No calls yet</strong>
-        <span>Completed conversations will appear here once campaigns start running.</span>
+        <div className="empty-state-icon">
+          <Phone size={22} />
+        </div>
+        <h3>No calls yet</h3>
+        <p>Completed conversations will appear here once campaigns start running.</p>
       </div>
     );
   }
 
   return (
-    <div className="table-wrap">
+    <div>
       {isRefetching && (
-        <div className="table-refreshing">
-          <RefreshCw size={14} className="spin" /> Refreshing…
+        <div className="table-refresh-bar">
+          <RefreshCw size={12} className="spin" />
+          Refreshing call data…
         </div>
       )}
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Lead</th>
-            <th>Direction</th>
-            <th>Status</th>
-            <th>Outcome</th>
-            <th>Duration</th>
-            <th>Started</th>
-            <th aria-label="Actions" />
-          </tr>
-        </thead>
-        <tbody>
-          {calls.map((call) => (
-            <tr key={call.call_id} className="data-table__row">
-              <td>
-                <div className="lead-cell">
-                  <Link className="lead-link" to={`/calling/${call.call_id}`}>
-                    {call.lead_id}
-                    <ArrowUpRight size={13} />
-                  </Link>
-                  <small>{call.to_number ?? call.from_number ?? "—"}</small>
-                </div>
-              </td>
-              <td>
-                <span className={`direction-tag direction-tag--${call.direction.toLowerCase()}`}>
-                  {call.direction === "OUTBOUND" ? "↑ Out" : "↓ In"}
-                </span>
-              </td>
-              <td>
-                <CallBadge value={call.status} />
-              </td>
-              <td>
-                <CallBadge value={call.outcome} />
-              </td>
-              <td className="numeric">{formatDuration(call.duration_seconds)}</td>
-              <td className="numeric">{formatDate(call.started_at ?? call.ended_at)}</td>
-              <td>
-                <Link
-                  className="icon-btn"
-                  aria-label="Open call detail"
-                  to={`/calling/${call.call_id}`}
-                >
-                  <ChevronRight size={17} />
-                </Link>
-              </td>
+      <div className="table-container">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Lead</th>
+              <th>Direction</th>
+              <th>Status</th>
+              <th>Outcome</th>
+              <th style={{ textAlign: "right" }}>Duration</th>
+              <th style={{ textAlign: "right" }}>Started</th>
+              <th style={{ width: 40 }} />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {calls.map((call) => (
+              <tr
+                key={call.call_id}
+                onClick={() => { window.location.href = `/calling/${call.call_id}`; }}
+              >
+                <td>
+                  <div className="cell-lead">
+                    <Link
+                      className="cell-lead-id"
+                      to={`/calling/${call.call_id}`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {call.lead_id}
+                      <ArrowUpRight size={12} style={{ color: "var(--tx-lo)" }} />
+                    </Link>
+                    <span className="cell-lead-num">
+                      {call.to_number ?? call.from_number ?? "—"}
+                    </span>
+                  </div>
+                </td>
+
+                <td>
+                  <span
+                    className={`direction-pill direction-pill--${call.direction.toLowerCase()}`}
+                  >
+                    {call.direction === "OUTBOUND" ? "↑ Out" : "↓ In"}
+                  </span>
+                </td>
+
+                <td><CallBadge value={call.status} /></td>
+                <td><CallBadge value={call.outcome} /></td>
+
+                <td className="cell-numeric">{fmtDuration(call.duration_seconds)}</td>
+                <td className="cell-numeric">{fmtDate(call.started_at ?? call.ended_at)}</td>
+
+                <td>
+                  <Link
+                    className="icon-btn"
+                    aria-label="Open call detail"
+                    to={`/calling/${call.call_id}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ChevronRight size={16} />
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
