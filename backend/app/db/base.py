@@ -1,4 +1,4 @@
 from app.db.session import Base
-from app.models.auth import AppUser, AuthCredential, AuthOtpCode, AuthRefreshToken
+from app.models.calling import Call, SeenWebhookEvent  # noqa: F401
 
-__all__ = ["Base", "AppUser", "AuthCredential", "AuthOtpCode", "AuthRefreshToken"]
+__all__ = ["Base", "Call", "SeenWebhookEvent"]

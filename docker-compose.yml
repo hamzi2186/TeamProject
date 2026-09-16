@@ -1,4 +1,92 @@
 services:
+  # ── Calling Engine Backend ─────────────────────────────────────────────
+  calling-backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      TPI_API_BASE_URL: http://tpi:8001
+      AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
+      CALLING_INTERNAL_WEBHOOK_URL: http://calling-backend:8002/api/v1/webhooks/vapi/events
+    command:
+      - sh
+      - -c
+      - "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8002"
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./.secrets:/app/.secrets:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/db')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ── Calling Engine Worker ──────────────────────────────────────────────
+  calling-worker:
+    build: ./backend
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      TPI_API_BASE_URL: http://tpi:8001
+      AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
+    command: >
+      celery -A app.workers.celery_app:celery_app worker
+      --loglevel=INFO -Q calling.calls
+    volumes:
+      - ./.secrets:/app/.secrets:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      calling-backend:
+        condition: service_healthy
+
+  # ── TPI Voice Boundary ─────────────────────────────────────────────────
+  tpi:
+    build: ../tpi-engine/backend
+    env_file:
+      - .env
+    environment:
+      CALLING_INTERNAL_WEBHOOK_URL: http://calling-backend:8002/api/v1/webhooks/vapi/events
+    ports:
+      - "8001:8000"
+    depends_on:
+      calling-backend:
+        condition: service_healthy
+
+  # ── Calling Engine Frontend ────────────────────────────────────────────
+  calling-frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: http://localhost:8002
+        VITE_ROOT_AUTH_URL: http://localhost:5173/auth/login
+    ports:
+      - "5174:80"
+    depends_on:
+      calling-backend:
+        condition: service_healthy
+
+  # ── Shared Infrastructure ──────────────────────────────────────────────
+  # NOTE: In integrated deployment, these run from the root docker-compose.yml.
+  # Uncomment for standalone Calling Engine development:
+  #
+  # redis:
+  #   image: redis:7.4-alpine
+  #   command: ["redis-server", "--appendonly", "yes"]
+  #   ports: ["6379:6379"]
+  #   volumes: [redis_data:/data]
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
+  #
+  # For postgres and tpi, point to the root platform's compose network.
+
   redis:
     image: redis:7.4-alpine
     command: ["redis-server", "--appendonly", "yes"]
@@ -11,72 +99,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
-  tpi:
-    build: ./tpi-engine/backend
-    env_file:
-      - ./tpi-engine/backend/.env
-    ports:
-      - "8001:8001"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  backend:
-    build: ./backend
-    env_file:
-      - ./backend/.env
-    environment:
-      REDIS_URL: redis://redis:6379/0
-      TPI_API_BASE_URL: http://tpi:8001
-      AUTH_JWT_PRIVATE_KEY_PATH: /app/.secrets/auth_private.pem
-      AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend/.secrets:/app/.secrets
-    depends_on:
-      redis:
-        condition: service_healthy
-      tpi:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/db')"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
-  worker:
-    build: ./backend
-    env_file:
-      - ./backend/.env
-    environment:
-      REDIS_URL: redis://redis:6379/0
-      TPI_API_BASE_URL: http://tpi:8001
-      AUTH_JWT_PRIVATE_KEY_PATH: /app/.secrets/auth_private.pem
-      AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
-    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "platform.default,platform.auth_email"]
-    volumes:
-      - ./backend/.secrets:/app/.secrets
-    depends_on:
-      redis:
-        condition: service_healthy
-      backend:
-        condition: service_healthy
-
-  frontend:
-    build:
-      context: ./frontend
-      args:
-        VITE_API_BASE_URL: http://localhost:8000
-    ports:
-      - "5173:80"
-    depends_on:
-      backend:
-        condition: service_healthy
 
 volumes:
   redis_data:

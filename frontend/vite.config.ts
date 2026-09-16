@@ -1,4 +1,16 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({ plugins: [react()] });
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5174,
+    proxy: {
+      // Proxy API calls to Calling Engine backend in dev
+      "/api": {
+        target: "http://localhost:8002",
+        changeOrigin: true,
+      },
+    },
+  },
+});
