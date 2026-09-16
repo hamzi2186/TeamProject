@@ -1,11 +1,13 @@
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote, unquote
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
 
     app_env: str = "development"
     frontend_url: str = "http://localhost:5174"
@@ -13,6 +15,26 @@ class Settings(BaseSettings):
 
     # Database (shared Supabase/PostgreSQL project)
     database_url: str = "sqlite+aiosqlite:///./calling-engine.db"
+
+    @field_validator("database_url")
+    @classmethod
+    def normalize_database_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        driver, separator, remainder = value.partition("://")
+        if not separator:
+            return value
+        if "@" in remainder:
+            user_info, host_info = remainder.rsplit("@", 1)
+            if ":" in user_info:
+                username, password = user_info.split(":", 1)
+                encoded_user = quote(unquote(username), safe=".")
+                encoded_password = quote(unquote(password), safe="")
+                user_info = f"{encoded_user}:{encoded_password}"
+                remainder = f"{user_info}@{host_info}"
+        if driver in {"postgres", "postgresql", "postgresql+psycopg"}:
+            driver = "postgresql+asyncpg"
+        return f"{driver}://{remainder}"
 
     # Redis (shared)
     redis_url: str = "redis://localhost:6379/0"
