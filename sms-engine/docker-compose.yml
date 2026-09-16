@@ -1,0 +1,108 @@
+services:
+  sms-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: trex_sms
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - sms_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d trex_sms"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - sms_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  tpi:
+    build: ../tpi-engine/backend
+    environment:
+      APP_ENV: development
+      TPI_INTERNAL_SERVICE_TOKEN: ${TPI_INTERNAL_SERVICE_TOKEN:-local-tpi-token}
+      SMS_INTERNAL_SERVICE_TOKEN: ${SMS_INTERNAL_SERVICE_TOKEN:-local-sms-token}
+      SMS_ENGINE_INTERNAL_BASE_URL: http://sms-backend:8002
+      SMTP_HOST: unused.local
+      SMTP_USERNAME: unused
+      SMTP_PASSWORD: unused
+      SMTP_FROM_EMAIL: unused@example.com
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_DEFAULT_USER_ID: ${DEMO_USER_ID:-33333333-3333-4333-8333-333333333333}
+      TWILIO_DEFAULT_SMS_FROM_NUMBER: ${TWILIO_SMS_FROM_NUMBER:-}
+      TWILIO_MESSAGING_SERVICE_SID: ${TWILIO_MESSAGING_SERVICE_SID:-}
+      PUBLIC_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_BASE_URL:-}
+      SMS_PROVIDER: ${SMS_PROVIDER:-mock}
+      MOCK_SMS_FROM_NUMBER: ${MOCK_SMS_FROM_NUMBER:-+15555550100}
+    ports:
+      - "8001:8001"
+
+  sms-backend:
+    build: ./backend
+    environment: &sms_environment
+      APP_ENV: development
+      FRONTEND_URL: http://localhost:5174
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@sms-db:5432/trex_sms
+      REDIS_URL: redis://redis:6379/1
+      AUTH_JWKS_URL: http://host.docker.internal:8000/.well-known/jwks.json
+      ALLOW_DEMO_IDENTITY: "true"
+      TPI_API_BASE_URL: http://tpi:8001
+      TPI_INTERNAL_SERVICE_TOKEN: ${TPI_INTERNAL_SERVICE_TOKEN:-local-tpi-token}
+      SMS_INTERNAL_SERVICE_TOKEN: ${SMS_INTERNAL_SERVICE_TOKEN:-local-sms-token}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
+      GROQ_MAX_COMPLETION_TOKENS: ${GROQ_MAX_COMPLETION_TOKENS:-1024}
+      SMS_PROVIDER: ${SMS_PROVIDER:-mock}
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8002"]
+    ports:
+      - "8002:8002"
+    depends_on:
+      sms-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tpi:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/db')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  sms-worker:
+    build: ./backend
+    environment: *sms_environment
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "sms.conversations"]
+    depends_on:
+      sms-backend:
+        condition: service_healthy
+
+  sms-frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_SMS_API_BASE_URL: http://localhost:8002
+        VITE_DEMO_USER_ID: ${DEMO_USER_ID:-33333333-3333-4333-8333-333333333333}
+        VITE_SMS_PROVIDER: ${SMS_PROVIDER:-mock}
+    ports:
+      - "5174:80"
+    depends_on:
+      sms-backend:
+        condition: service_healthy
+
+volumes:
+  sms_db_data:
+  sms_redis_data:

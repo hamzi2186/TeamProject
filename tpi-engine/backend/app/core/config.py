@@ -1,8 +1,15 @@
 from functools import lru_cache
+from typing import Literal
 from urllib.parse import quote, unquote
 
-from pydantic import EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class TwilioNumberRoute(BaseModel):
+    user_id: str
+    phone_number: str | None = None
+    messaging_service_sid: str | None = None
 
 
 class Settings(BaseSettings):
@@ -20,6 +27,8 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     database_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
+
+    # HubSpot OAuth
     hubspot_client_id: str
     hubspot_client_secret: str
     hubspot_redirect_uri: str
@@ -27,6 +36,8 @@ class Settings(BaseSettings):
     hubspot_token_encryption_key: str
     hubspot_oauth_state_ttl_seconds: int = 600
     hubspot_refresh_skew_seconds: int = 300
+
+    # Embeddings (scraper + agent)
     embedding_provider: str = "jina"
     embedding_fallback_provider: str | None = None
     jina_api_key: str | None = None
@@ -38,6 +49,19 @@ class Settings(BaseSettings):
     agent_jina_api_key: str | None = None
     agent_jina_embedding_model: str = "jina-embeddings-v3"
     agent_jina_embedding_dimension: int = 1024
+
+    # SMS / Twilio
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_number_routes: list[TwilioNumberRoute] = Field(default_factory=list)
+    twilio_default_user_id: str | None = None
+    twilio_default_sms_from_number: str | None = None
+    twilio_messaging_service_sid: str | None = None
+    public_webhook_base_url: str | None = None
+    sms_engine_internal_base_url: str = "http://sms-backend:8004"
+    sms_internal_service_token: str | None = None
+    sms_provider: Literal["twilio", "mock"] = "twilio"
+    mock_sms_from_number: str = "+15555550100"
 
     @field_validator(
         "tpi_internal_service_token",
@@ -78,6 +102,10 @@ class Settings(BaseSettings):
     @property
     def hubspot_scope_list(self) -> list[str]:
         return [scope for scope in self.hubspot_scopes.replace(",", " ").split() if scope]
+
+    @property
+    def twilio_configured(self) -> bool:
+        return bool(self.twilio_account_sid and self.twilio_auth_token)
 
 
 @lru_cache
