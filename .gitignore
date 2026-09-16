@@ -7,3 +7,7 @@ __pycache__/
 node_modules/
 dist/
 postgres-data/
+
+*.tsbuildinfo
+*.db
+*.sqlite3
