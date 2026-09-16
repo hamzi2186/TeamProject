@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, DateTime, Index, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -75,7 +75,7 @@ class Call(TimestampMixin, Base):
     recording_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Normalized provider metadata (never raw provider secrets)
-    provider_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    provider_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
 
 class SeenWebhookEvent(Base):

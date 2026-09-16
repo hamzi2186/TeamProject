@@ -91,6 +91,19 @@ class SQLCallRepository:
             existing.recording_url = call.recording_url or existing.recording_url
             existing.provider_payload = call.provider_payload or existing.provider_payload
             existing.updated_at = datetime.now(timezone.utc)
+
+        # Update matching lead status if outcome is classified (Task §5)
+        if call.outcome and call.lead_id:
+            try:
+                lead_uuid = _uuid.UUID(call.lead_id)
+                from app.models.lead import Lead
+                lead = await self.db.get(Lead, lead_uuid)
+                if lead:
+                    lead.current_status = call.outcome.lower()
+                    lead.updated_at = datetime.now(timezone.utc)
+            except Exception:
+                pass
+
         await self.db.commit()
         return call
 

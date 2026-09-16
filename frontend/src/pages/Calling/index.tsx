@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Phone } from "lucide-react";
+import { CheckCircle2, Clock, Info, Phone, PhoneCall, PhoneForwarded, PhoneMissed } from "lucide-react";
 import { callingApi, callingKeys } from "../../api/calling";
 import type { ListCallsParams } from "../../api/calling";
 import { CallTable } from "../../features/calling/CallTable";
-import type { CallStatus, CallOutcome } from "../../types/calling";
 
 const STATUS_OPTIONS: Array<{ label: string; value: string }> = [
   { label: "All Statuses", value: "" },
@@ -29,6 +28,12 @@ const OUTCOME_OPTIONS: Array<{ label: string; value: string }> = [
   { label: "Failed", value: "FAILED" },
 ];
 
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}m ${s < 10 ? "0" : ""}${s}s`;
+}
+
 export function CallingListPage() {
   const [status, setStatus] = useState<string>("");
   const [outcome, setOutcome] = useState<string>("");
@@ -43,26 +48,83 @@ export function CallingListPage() {
   const { data, isLoading, isError, isRefetching, refetch } = useQuery({
     queryKey: callingKeys.list(params),
     queryFn: () => callingApi.listCalls(params),
-    refetchInterval: 15_000, // Auto-refresh every 15s for live call status
+    refetchInterval: 15_000,
     staleTime: 10_000,
   });
 
   const calls = data?.data ?? [];
 
+  // Metrics computation (Task §9)
+  const totalCalls = calls.length;
+  const answeredCalls = calls.filter(
+    (c) =>
+      c.status === "COMPLETED" ||
+      c.status === "IN_PROGRESS" ||
+      (c.duration_seconds !== null && c.duration_seconds > 0)
+  ).length;
+  const noAnswerCalls = calls.filter(
+    (c) => c.status === "NO_ANSWER" || c.outcome === "NO_ANSWER"
+  ).length;
+  const totalDuration = calls.reduce((acc, c) => acc + (c.duration_seconds || 0), 0);
+  const avgDuration = answeredCalls > 0 ? Math.round(totalDuration / answeredCalls) : 0;
+
   return (
     <div className="page">
-      {/* Page header */}
+      {/* KB Pending / Mock Status Notice (Task §6) */}
+      <div className="notice info" style={{ marginBottom: "1.5rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <Info size={16} />
+        <span>
+          <strong>Knowledge Base:</strong> Mock KB search active (Crawler / Scraper integration pending). Calls are non-blocking.
+        </span>
+      </div>
+
+      {/* Page Header */}
       <div className="page-header">
         <div className="page-header__left">
           <div className="page-icon">
-            <Phone size={18} />
+            <Phone size={20} />
           </div>
           <div>
-            <h1 className="page-title">Calls</h1>
+            <h1 className="page-title">Calling Engine</h1>
             <p className="page-sub">
-              {isLoading ? "Loading…" : `${calls.length} call${calls.length !== 1 ? "s" : ""}`}
+              {isLoading ? "Loading calls…" : `${totalCalls} total call${totalCalls !== 1 ? "s" : ""} recorded`}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Metrics Row (Task §9) */}
+      <div className="metrics-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
+        <div className="metric-card" style={{ background: "#fff", border: "1px solid var(--border)", borderRadius: "8px", padding: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+            <PhoneCall size={16} />
+            <span>Calls Made</span>
+          </div>
+          <div style={{ fontSize: "1.75rem", fontWeight: 700 }}>{totalCalls}</div>
+        </div>
+
+        <div className="metric-card" style={{ background: "#fff", border: "1px solid var(--border)", borderRadius: "8px", padding: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+            <CheckCircle2 size={16} color="#16a34a" />
+            <span>Answered</span>
+          </div>
+          <div style={{ fontSize: "1.75rem", fontWeight: 700, color: "#16a34a" }}>{answeredCalls}</div>
+        </div>
+
+        <div className="metric-card" style={{ background: "#fff", border: "1px solid var(--border)", borderRadius: "8px", padding: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+            <PhoneMissed size={16} color="#dc2626" />
+            <span>No Answer</span>
+          </div>
+          <div style={{ fontSize: "1.75rem", fontWeight: 700, color: "#dc2626" }}>{noAnswerCalls}</div>
+        </div>
+
+        <div className="metric-card" style={{ background: "#fff", border: "1px solid var(--border)", borderRadius: "8px", padding: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+            <Clock size={16} />
+            <span>Avg Duration</span>
+          </div>
+          <div style={{ fontSize: "1.75rem", fontWeight: 700 }}>{formatDuration(avgDuration)}</div>
         </div>
       </div>
 
@@ -111,7 +173,11 @@ export function CallingListPage() {
         {(status || outcome || leadId) && (
           <button
             className="btn-ghost"
-            onClick={() => { setStatus(""); setOutcome(""); setLeadId(""); }}
+            onClick={() => {
+              setStatus("");
+              setOutcome("");
+              setLeadId("");
+            }}
           >
             Clear
           </button>

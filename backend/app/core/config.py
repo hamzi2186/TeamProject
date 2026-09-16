@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     auth_issuer: str = "t-rex"
     auth_audience: str = "t-rex-engines"
     dev_auth_bypass: bool = False
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
+    otp_expire_minutes: int = 10
+    otp_resend_cooldown_seconds: int = 60
+    otp_max_attempts: int = 5
 
     # Calling engine specifics
     # URL where TPI will POST normalized Vapi events back to this engine
