@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     local_embedding_model: str = "trex-local-hash-v1"
     local_embedding_dimension: int = 1024
     embedding_timeout_seconds: float = 30
+    agent_jina_api_key: str | None = None
+    agent_jina_embedding_model: str = "jina-embeddings-v3"
+    agent_jina_embedding_dimension: int = 1024
 
     @field_validator(
         "tpi_internal_service_token",

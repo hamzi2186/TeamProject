@@ -19,10 +19,12 @@ class EmbeddingService:
         *,
         primary: str,
         fallback: str | None,
+        agent_provider: EmbeddingProvider | None = None,
     ) -> None:
         self._providers = providers
         self._primary = primary
         self._fallback = fallback
+        self._agent_provider = agent_provider
 
     async def passages(
         self,
@@ -31,6 +33,7 @@ class EmbeddingService:
         provider: str | None = None,
         model: str | None = None,
         dimension: int | None = None,
+        consumer: str | None = None,
     ) -> EmbeddingResponse:
         return await self._embed(
             texts,
@@ -38,6 +41,7 @@ class EmbeddingService:
             provider=provider,
             model=model,
             dimension=dimension,
+            consumer=consumer,
         )
 
     async def query(
@@ -47,6 +51,7 @@ class EmbeddingService:
         provider: str | None = None,
         model: str | None = None,
         dimension: int | None = None,
+        consumer: str | None = None,
     ) -> EmbeddingResponse:
         return await self._embed(
             [text],
@@ -54,6 +59,7 @@ class EmbeddingService:
             provider=provider,
             model=model,
             dimension=dimension,
+            consumer=consumer,
         )
 
     async def _embed(
@@ -64,9 +70,19 @@ class EmbeddingService:
         provider: str | None,
         model: str | None,
         dimension: int | None,
+        consumer: str | None = None,
     ) -> EmbeddingResponse:
-        selected_name = (provider or self._primary).casefold()
-        selected = self._providers.get(selected_name)
+        is_agent = (consumer or "").casefold() == "agent"
+        if is_agent and not provider and self._agent_provider is not None:
+            selected = self._agent_provider
+            selected_name = "agent-jina"
+        else:
+            selected_name = (provider or self._primary).casefold()
+            selected = self._providers.get(selected_name)
+            if selected is None and is_agent and self._agent_provider is not None:
+                selected = self._agent_provider
+                selected_name = "agent-jina"
+
         if selected is None:
             if (
                 provider
@@ -120,8 +136,19 @@ def get_embedding_service() -> EmbeddingService:
             dimension=settings.jina_embedding_dimension,
             timeout_seconds=settings.embedding_timeout_seconds,
         )
+    agent_provider: EmbeddingProvider | None = None
+    agent_key = settings.agent_jina_api_key or settings.jina_api_key
+    if agent_key:
+        agent_provider = JinaEmbeddingProvider(
+            api_key=agent_key,
+            model=settings.agent_jina_embedding_model,
+            dimension=settings.agent_jina_embedding_dimension,
+            timeout_seconds=settings.embedding_timeout_seconds,
+        )
+        providers["agent-jina"] = agent_provider
     return EmbeddingService(
         providers,
         primary=settings.embedding_provider,
         fallback=settings.embedding_fallback_provider,
+        agent_provider=agent_provider,
     )

@@ -5,6 +5,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.contracts.embeddings import EmbeddingResponse
 from app.main import app
 from app.providers.embeddings.errors import (
     EmbeddingDimensionError,
@@ -124,7 +125,8 @@ async def test_jina_failure_does_not_silently_fallback_to_local():
     with pytest.raises(EmbeddingRateLimitError):
         await service.passages(["test"])
 
-    # When Jina provider is not available, must raise EmbeddingUnavailableError instead of substituting local
+    # When Jina provider is not available, must raise EmbeddingUnavailableError
+    # instead of substituting local
     missing_service = EmbeddingService({"local": local}, primary="jina", fallback="local")
     with pytest.raises(EmbeddingUnavailableError):
         await missing_service.passages(["test"])
@@ -169,4 +171,91 @@ def test_embeddings_api_requires_internal_auth_and_exposes_no_secret(monkeypatch
     serialized = json.dumps(response.json()).casefold()
     assert "test-only-key" not in serialized
     assert "authorization" not in serialized
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_agent_consumer_routing():
+    agent_provider_instance = LocalHashEmbeddingProvider(
+        model="agent-jina-model",
+        dimension=1024,
+    )
+    default_provider = LocalHashEmbeddingProvider(
+        model="default-model",
+        dimension=1024,
+    )
+    service = EmbeddingService(
+        providers={"local": default_provider},
+        primary="local",
+        fallback=None,
+        agent_provider=agent_provider_instance,
+    )
+
+    # Standard request uses default
+    res_default = await service.passages(["hello"])
+    assert res_default.model == "default-model"
+
+    # Agent consumer uses agent_provider
+    res_agent = await service.passages(["hello"], consumer="agent")
+    assert res_agent.model == "agent-jina-model"
+    assert res_agent.provider == "local"
+
+    # Agent query uses agent_provider
+    res_query = await service.query("hello", consumer="agent")
+    assert res_query.model == "agent-jina-model"
+
+
+def test_agent_header_forwarded_to_service(monkeypatch):
+    import app.api.dependencies as dependencies
+
+    captured_consumer = []
+
+    class CapturingService:
+        async def passages(self, texts, **kwargs):
+            captured_consumer.append(kwargs.get("consumer"))
+            return EmbeddingResponse(
+                embeddings=[[0.1] * 2],
+                provider="agent-jina",
+                model="jina-embeddings-v3",
+                dimension=2,
+            )
+
+        async def query(self, text, **kwargs):
+            captured_consumer.append(kwargs.get("consumer"))
+            return EmbeddingResponse(
+                embeddings=[[0.1] * 2],
+                provider="agent-jina",
+                model="jina-embeddings-v3",
+                dimension=2,
+            )
+
+    monkeypatch.setattr(
+        dependencies,
+        "get_settings",
+        lambda: SimpleNamespace(tpi_internal_service_token="internal-test-token"),
+    )
+    app.dependency_overrides[get_embedding_service] = lambda: CapturingService()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/internal/embeddings/passages",
+        json={"texts": ["one"]},
+        headers={
+            "X-TPI-Service-Token": "internal-test-token",
+            "X-Consumer-Engine": "agent",
+        },
+    )
+    assert response.status_code == 200
+    assert captured_consumer == ["agent"]
+
+    response_query = client.post(
+        "/api/v1/internal/embeddings/query",
+        json={"text": "search query"},
+        headers={
+            "X-TPI-Service-Token": "internal-test-token",
+            "X-Consumer-Engine": "agent",
+        },
+    )
+    assert response_query.status_code == 200
+    assert captured_consumer == ["agent", "agent"]
     app.dependency_overrides.clear()

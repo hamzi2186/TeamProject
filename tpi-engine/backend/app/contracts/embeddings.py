@@ -13,6 +13,7 @@ class PassageEmbeddingRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
     dimension: int | None = Field(default=None, ge=1, le=4096)
+    consumer: str | None = None
 
     @field_validator("texts")
     @classmethod
@@ -28,6 +29,7 @@ class QueryEmbeddingRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
     dimension: int | None = Field(default=None, ge=1, le=4096)
+    consumer: str | None = None
 
     @field_validator("text")
     @classmethod
