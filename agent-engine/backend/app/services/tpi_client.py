@@ -183,3 +183,101 @@ def create_tpi_embedding_client() -> TPIEmbeddingClient:
         default_dimension=settings.embedding_dimension,
     )
 
+
+class TPILlmError(RuntimeError):
+    def __init__(
+        self, message: str, *, retryable: bool = False, code: str = "TPI_LLM_ERROR"
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.code = code
+
+
+@dataclass(frozen=True)
+class LLMGenerationResult:
+    text: str
+    provider: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+
+
+class TPILlmClient:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        service_token: str,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._service_token = service_token
+        self._owns_client = http_client is None
+        self._client = http_client or httpx.AsyncClient(timeout=45, trust_env=False)
+
+    async def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+        max_tokens: int = 800,
+    ) -> LLMGenerationResult:
+        payload = {
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "consumer": "agent",
+        }
+        try:
+            response = await self._client.post(
+                f"{self._base_url}/api/v1/internal/llm/generate",
+                headers={
+                    "X-TPI-Service-Token": self._service_token,
+                    "X-Consumer-Engine": "agent",
+                },
+                json=payload,
+            )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise TPILlmError("LLM generation service is unavailable", retryable=True) from exc
+
+        if response.status_code >= 400:
+            retryable = response.status_code in {429, 502, 503, 504}
+            code = "TPI_LLM_ERROR"
+            message = "LLM generation service could not complete the request"
+            try:
+                detail = response.json().get("detail", {})
+                if isinstance(detail, dict):
+                    code = str(detail.get("code", code))
+                    message = str(detail.get("message", message))
+                    retryable = bool(detail.get("retryable", retryable))
+            except (TypeError, ValueError):
+                pass
+            raise TPILlmError(message, retryable=retryable, code=code)
+
+        try:
+            data = response.json()
+            usage = data.get("usage") or {}
+            return LLMGenerationResult(
+                text=data["text"],
+                provider=data["provider"],
+                model=data["model"],
+                input_tokens=int(usage.get("input_tokens", 0) or 0),
+                output_tokens=int(usage.get("output_tokens", 0) or 0),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise TPILlmError("LLM generation service returned an invalid response") from exc
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+
+def create_tpi_llm_client() -> TPILlmClient:
+    settings = get_settings()
+    return TPILlmClient(
+        base_url=settings.tpi_api_base_url,
+        service_token=settings.tpi_internal_service_token,
+    )
+

@@ -7,6 +7,7 @@ from app.api.email_delivery import router as email_router
 from app.api.embeddings import router as embeddings_router
 from app.api.hubspot import callback as hubspot_callback
 from app.api.hubspot import internal_router as hubspot_internal_router
+from app.api.llm import router as llm_router
 from app.api.mock_sms import router as mock_sms_router
 from app.api.sms_delivery import router as sms_delivery_router
 from app.api.twilio_webhooks import router as twilio_webhooks_router
@@ -25,9 +26,12 @@ app.include_router(embeddings_router)
 
 # HubSpot OAuth
 app.include_router(hubspot_internal_router)
+app.include_router(llm_router)
+
 hubspot_callback_path = urlparse(settings.hubspot_redirect_uri).path
 if not hubspot_callback_path.startswith("/"):
     raise RuntimeError("HUBSPOT_REDIRECT_URI must contain an absolute callback path")
+
 app.add_api_route(
     hubspot_callback_path,
     hubspot_callback,
@@ -58,5 +62,6 @@ async def health() -> dict:
             "sms": settings.sms_provider,
             "twilio_sms": "configured" if settings.twilio_configured else "pending_configuration",
             "vapi": "configured" if settings.vapi_configured else "pending_configuration",
+            "llm": "groq" if settings.groq_api_key else "not_configured",
         },
     }

@@ -112,3 +112,61 @@ def test_public_search_with_user_auth(monkeypatch):
     )
     assert response.status_code == 200
     app.dependency_overrides.clear()
+
+
+def test_assistant_ask_requires_auth():
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/agent/assistant/ask",
+        json={"question": "How does scraper work?"},
+    )
+    assert response.status_code == 401
+
+
+def test_assistant_ask_with_user_auth(monkeypatch):
+    from app.schemas.agent import (
+        AssistantAskResponse,
+        AssistantGenerationInfo,
+        AssistantSourceItem,
+    )
+    from app.services.assistant import AgentAssistantService
+
+    mock_ask = AsyncMock(
+        return_value=AssistantAskResponse(
+            answer="Scraper crawls websites.",
+            sources=[
+                AssistantSourceItem(
+                    module_key="scraper",
+                    source_path="scraper/overview.md",
+                    header_path="Overview",
+                    similarity=0.88,
+                )
+            ],
+            generation=AssistantGenerationInfo(
+                provider="groq",
+                model="llama-3.3-70b-versatile",
+                input_tokens=50,
+                output_tokens=10,
+            ),
+        )
+    )
+    monkeypatch.setattr(AgentAssistantService, "ask", mock_ask)
+
+    app.dependency_overrides[get_db] = lambda: AsyncMock()
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        user_id=uuid.uuid4(), role="customer"
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/agent/assistant/ask",
+        json={"question": "How does scraper work?", "top_k": 3},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["answer"] == "Scraper crawls websites."
+    assert len(data["sources"]) == 1
+    assert data["sources"][0]["source_path"] == "scraper/overview.md"
+    assert data["generation"]["provider"] == "groq"
+    assert data["generation"]["model"] == "llama-3.3-70b-versatile"
+    app.dependency_overrides.clear()

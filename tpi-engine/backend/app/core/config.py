@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     agent_jina_api_key: str | None = None
     agent_jina_embedding_model: str = "jina-embeddings-v3"
     agent_jina_embedding_dimension: int = 1024
+    groq_api_key: str | None = None
+    groq_model: str = "llama-3.3-70b-versatile"
+    llm_timeout_seconds: float = 30.0
 
     # SMS / Twilio
     twilio_account_sid: str | None = None

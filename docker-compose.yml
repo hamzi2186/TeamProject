@@ -36,6 +36,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
+      PYTHONPATH: /app
       REDIS_URL: redis://redis:6379/0
       TPI_API_BASE_URL: http://tpi:8001
       SCRAPER_API_BASE_URL: http://scraper-backend:8002

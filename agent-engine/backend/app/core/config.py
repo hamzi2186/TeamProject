@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 32
     default_top_k: int = 5
     default_similarity_threshold: float = 0.5
+    agent_assistant_top_k: int = 5
+    agent_assistant_min_similarity: float = 0.5
+    agent_assistant_context_max_chars: int = 8000
 
     @field_validator("database_url")
     @classmethod

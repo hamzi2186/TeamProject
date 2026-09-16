@@ -73,3 +73,34 @@ class AgentDocumentSummary(BaseModel):
     active: bool
     last_indexed_at: datetime | None = None
 
+
+class AssistantAskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000, description="User question")
+    top_k: int | None = Field(default=None, ge=1, le=50, description="Max chunks to retrieve")
+    module_filter: str | None = Field(
+        default=None, description="Optional module filter (e.g. 'scraper')"
+    )
+    similarity_threshold: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Minimum cosine similarity"
+    )
+
+
+class AssistantSourceItem(BaseModel):
+    module_key: str
+    source_path: str
+    header_path: str | None = None
+    similarity: float
+
+
+class AssistantGenerationInfo(BaseModel):
+    provider: str
+    model: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+class AssistantAskResponse(BaseModel):
+    answer: str
+    sources: list[AssistantSourceItem] = Field(default_factory=list)
+    generation: AssistantGenerationInfo | None = None
+

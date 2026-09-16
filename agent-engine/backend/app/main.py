@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.api.admin import router as admin_router
+from app.api.assistant import router as assistant_router
 from app.api.retrieval import router as retrieval_router
 from app.core.config import get_settings
 from app.db.session import engine
@@ -29,6 +30,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(admin_router)
+app.include_router(assistant_router)
 app.include_router(retrieval_router)
 
 

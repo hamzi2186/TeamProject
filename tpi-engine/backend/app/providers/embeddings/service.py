@@ -74,7 +74,7 @@ class EmbeddingService:
     ) -> EmbeddingResponse:
         is_agent = (consumer or "").casefold() == "agent"
         if is_agent:
-            if provider and provider.casefold() not in {"agent-jina", "agent"}:
+            if provider and provider.casefold() not in {"agent-jina", "agent", "jina"}:
                 selected = self._providers.get(provider.casefold())
                 if selected is None:
                     raise EmbeddingUnavailableError(
