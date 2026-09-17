@@ -5,7 +5,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.security import generate_otp, hash_secret
+from app.core.security import generate_otp, hash_token
 from app.models.auth import AppUser, AuthOtpCode
 from app.services.tpi_email import send_auth_email
 
@@ -47,7 +47,7 @@ async def issue_otp(db: AsyncSession, user: AppUser, purpose: str) -> None:
         AuthOtpCode(
             user_id=user.id,
             purpose=purpose,
-            code_hash=hash_secret(code),
+            code_hash=hash_token(code),
             expires_at=now + timedelta(minutes=settings.otp_expire_minutes),
         )
     )

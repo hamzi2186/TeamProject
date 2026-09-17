@@ -7,6 +7,8 @@ from typing import Annotated
 from uuid import UUID
 
 import jwt
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -14,6 +16,7 @@ from app.core.config import get_settings
 from app.core.keys import ensure_jwt_keys, load_public_key
 
 bearer = HTTPBearer(auto_error=False)
+password_hasher = PasswordHasher()
 
 
 @dataclass(frozen=True)
@@ -64,20 +67,46 @@ def generate_otp() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
-def hash_secret(value: str) -> str:
+def hash_password(password: str) -> str:
+    return password_hasher.hash(password)
+
+
+def verify_password(password: str, encoded_hash: str) -> bool:
+    if _is_legacy_sha256_hash(encoded_hash):
+        return secrets.compare_digest(_sha256_digest(password), encoded_hash)
+    try:
+        return password_hasher.verify(encoded_hash, password)
+    except (InvalidHashError, VerificationError):
+        return False
+
+
+def password_needs_rehash(encoded_hash: str) -> bool:
+    if _is_legacy_sha256_hash(encoded_hash):
+        return True
+    try:
+        return password_hasher.check_needs_rehash(encoded_hash)
+    except InvalidHashError:
+        return False
+
+
+def _is_legacy_sha256_hash(encoded_hash: str) -> bool:
+    return len(encoded_hash) == 64 and all(char in "0123456789abcdef" for char in encoded_hash)
+
+
+def hash_token(value: str) -> str:
+    return _sha256_digest(value)
+
+
+def verify_token(value: str, encoded_hash: str) -> bool:
+    return secrets.compare_digest(hash_token(value), encoded_hash)
+
+
+def _sha256_digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def verify_secret(value: str, encoded: str) -> bool:
-    return secrets.compare_digest(hash_secret(value), encoded)
 
 
 def generate_refresh_token() -> str:
     return secrets.token_urlsafe(48)
-
-
-def digest_token(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def create_access_token(user_id: UUID, role: str) -> tuple[str, int]:

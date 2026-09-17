@@ -10,10 +10,12 @@ from app.auth.service import issue_otp, normalize_email
 from app.core.config import get_settings
 from app.core.security import (
     create_access_token,
-    digest_token,
     generate_refresh_token,
-    hash_secret,
-    verify_secret,
+    hash_password,
+    hash_token,
+    password_needs_rehash,
+    verify_password,
+    verify_token,
 )
 from app.db.session import get_db
 from app.models.auth import AppUser, AuthCredential, AuthOtpCode, AuthRefreshToken
@@ -52,7 +54,7 @@ async def create_session(db: AsyncSession, user: AppUser, response: Response) ->
     db.add(
         AuthRefreshToken(
             user_id=user.id,
-            token_hash=digest_token(refresh_token),
+            token_hash=hash_token(refresh_token),
             expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days),
         )
     )
@@ -74,7 +76,7 @@ async def register(
     if await db.scalar(select(AppUser.id).where(AppUser.email == email)):
         raise HTTPException(409, "An account with this email already exists")
     user = AppUser(email=email, role="customer")
-    user.credential = AuthCredential(password_hash=hash_secret(payload.password))
+    user.credential = AuthCredential(password_hash=hash_password(payload.password))
     db.add(user)
     await db.commit()
     await db.refresh(user)
@@ -121,11 +123,14 @@ async def login(
     if (
         not user
         or not user.credential
-        or not verify_secret(payload.password, user.credential.password_hash)
+        or not verify_password(payload.password, user.credential.password_hash)
     ):
         raise HTTPException(401, "Invalid email or password")
     if not user.email_verified_at:
         raise HTTPException(403, "Verify your email before signing in")
+    if password_needs_rehash(user.credential.password_hash):
+        user.credential.password_hash = hash_password(payload.password)
+        await db.commit()
     return await create_session(db, user, response)
 
 
@@ -141,7 +146,7 @@ async def refresh(
         raise HTTPException(401, "Refresh token required")
     now = datetime.now(UTC)
     stored = await db.scalar(
-        select(AuthRefreshToken).where(AuthRefreshToken.token_hash == digest_token(raw_token))
+        select(AuthRefreshToken).where(AuthRefreshToken.token_hash == hash_token(raw_token))
     )
     if not stored or stored.revoked_at or stored.expires_at <= now:
         raise HTTPException(401, "Invalid or expired refresh token")
@@ -150,7 +155,7 @@ async def refresh(
     result = await create_session(db, user, response)
     replacement = await db.scalar(
         select(AuthRefreshToken).where(
-            AuthRefreshToken.token_hash == digest_token(result.refresh_token)
+            AuthRefreshToken.token_hash == hash_token(result.refresh_token)
         )
     )
     stored.replaced_by_token_id = replacement.id
@@ -169,7 +174,7 @@ async def logout(
     if raw_token:
         await db.execute(
             update(AuthRefreshToken)
-            .where(AuthRefreshToken.token_hash == digest_token(raw_token))
+            .where(AuthRefreshToken.token_hash == hash_token(raw_token))
             .values(revoked_at=datetime.now(UTC))
         )
         await db.commit()
@@ -195,7 +200,7 @@ async def reset_password(
     if user is None:
         raise HTTPException(400, "Invalid reset request")
     await _consume_otp(db, user, "reset_password", payload.code)
-    user.credential.password_hash = hash_secret(payload.new_password)
+    user.credential.password_hash = hash_password(payload.new_password)
     await db.execute(
         update(AuthRefreshToken)
         .where(AuthRefreshToken.user_id == user.id, AuthRefreshToken.revoked_at.is_(None))
@@ -228,7 +233,7 @@ async def _consume_otp(db: AsyncSession, user: AppUser, purpose: str, code: str)
     now = datetime.now(UTC)
     if not otp or otp.expires_at <= now or otp.attempt_count >= settings.otp_max_attempts:
         raise HTTPException(400, "The code is invalid or expired")
-    if not verify_secret(code, otp.code_hash):
+    if not verify_token(code, otp.code_hash):
         otp.attempt_count += 1
         await db.commit()
         raise HTTPException(400, "The code is invalid or expired")
