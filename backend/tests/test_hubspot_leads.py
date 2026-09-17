@@ -132,15 +132,18 @@ class FakeLeadRepository:
 
 @pytest.mark.asyncio
 async def test_repeated_import_upserts_without_duplicate():
-    user_id = uuid4()
+    user_a = uuid4()
+    user_b = uuid4()
     repository = FakeLeadRepository()
     service = HubSpotImportService(FakeTPI(), repository)
     selection = HubSpotImportRequest(hubspot_contact_ids=["contact-1"])
-    first = await service.run(user_id, selection)
-    second = await service.run(user_id, selection)
-    assert first == ImportCounts(imported=1, created=1, updated=0)
-    assert second == ImportCounts(imported=1, created=0, updated=1)
-    assert len(repository.keys) == 1
+    first_a = await service.run(user_a, selection)
+    first_b = await service.run(user_b, selection)
+    second_a = await service.run(user_a, selection)
+    assert first_a == ImportCounts(imported=1, created=1, updated=0)
+    assert first_b == ImportCounts(imported=1, created=1, updated=0)
+    assert second_a == ImportCounts(imported=1, created=0, updated=1)
+    assert repository.keys == {(user_a, "contact-1"), (user_b, "contact-1")}
 
 
 class FakeImportService:
@@ -160,6 +163,40 @@ def test_import_uses_authenticated_tenant(authenticated_client):
     assert response.status_code == 200
     assert response.json() == {"imported": 2, "created": 1, "updated": 1}
     assert service.user_id == user.user_id
+
+
+def test_user_b_cannot_retrieve_user_as_hubspot_connection():
+    user_a = AuthenticatedUser(user_id=uuid4(), role="customer", email="a@example.test")
+    user_b = AuthenticatedUser(user_id=uuid4(), role="customer", email="b@example.test")
+
+    class UserScopedTPI:
+        def __init__(self):
+            self.user_ids = []
+
+        async def status(self, user_id):
+            self.user_ids.append(user_id)
+            if user_id == user_a.user_id:
+                return HubSpotConnectionStatus(
+                    status="connected", connected=True, portal_id="portal-a"
+                )
+            return HubSpotConnectionStatus(status="disconnected", connected=False)
+
+        async def contacts(self, user_id, **_kwargs):
+            self.user_ids.append(user_id)
+            if user_id != user_a.user_id:
+                raise TPIHubSpotError("HubSpot is not connected", 404)
+            return HubSpotContactPage(contacts=[])
+
+    tpi = UserScopedTPI()
+    app.dependency_overrides[get_current_user] = lambda: user_b
+    app.dependency_overrides[get_tpi_hubspot_client] = lambda: tpi
+    try:
+        with TestClient(app) as client:
+            assert client.get("/api/v1/hubspot/status").json()["connected"] is False
+            assert client.get("/api/v1/hubspot/contacts").status_code == 404
+        assert tpi.user_ids == [user_b.user_id, user_b.user_id]
+    finally:
+        app.dependency_overrides.clear()
 
 
 class FakeLeadListRepository:

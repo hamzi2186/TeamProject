@@ -48,13 +48,16 @@ class ConnectionRepository(Protocol):
         self,
         connection_id: uuid.UUID,
         *,
+        user_id: uuid.UUID,
         encrypted_access_token: str,
         encrypted_refresh_token: str,
         expires_at: datetime,
         scopes: list[str],
     ) -> HubSpotConnectionRecord: ...
 
-    async def set_status(self, connection_id: uuid.UUID, status: str) -> None: ...
+    async def set_status(
+        self, connection_id: uuid.UUID, *, user_id: uuid.UUID, status: str
+    ) -> None: ...
 
 
 @lru_cache
@@ -124,6 +127,7 @@ class SqlAlchemyConnectionRepository:
         self,
         connection_id: uuid.UUID,
         *,
+        user_id: uuid.UUID,
         encrypted_access_token: str,
         encrypted_refresh_token: str,
         expires_at: datetime,
@@ -132,7 +136,10 @@ class SqlAlchemyConnectionRepository:
         async with self._factory() as session:
             await session.execute(
                 update(HubSpotConnectionRecord)
-                .where(HubSpotConnectionRecord.id == connection_id)
+                .where(
+                    HubSpotConnectionRecord.id == connection_id,
+                    HubSpotConnectionRecord.user_id == user_id,
+                )
                 .values(
                     encrypted_access_token=encrypted_access_token,
                     encrypted_refresh_token=encrypted_refresh_token,
@@ -143,21 +150,29 @@ class SqlAlchemyConnectionRepository:
                 )
             )
             await session.commit()
-            return await self._get_by_id(session, connection_id)
+            return await self._get_by_id(session, connection_id, user_id=user_id)
 
-    async def set_status(self, connection_id: uuid.UUID, status: str) -> None:
+    async def set_status(
+        self, connection_id: uuid.UUID, *, user_id: uuid.UUID, status: str
+    ) -> None:
         async with self._factory() as session:
             await session.execute(
                 update(HubSpotConnectionRecord)
-                .where(HubSpotConnectionRecord.id == connection_id)
+                .where(
+                    HubSpotConnectionRecord.id == connection_id,
+                    HubSpotConnectionRecord.user_id == user_id,
+                )
                 .values(status=status, updated_at=datetime.now(UTC))
             )
             await session.commit()
 
     async def _get_by_id(
-        self, session: AsyncSession, connection_id: uuid.UUID
+        self, session: AsyncSession, connection_id: uuid.UUID, *, user_id: uuid.UUID | None = None
     ) -> HubSpotConnectionRecord:
-        connection = await session.get(HubSpotConnectionRecord, connection_id)
+        statement = select(HubSpotConnectionRecord).where(HubSpotConnectionRecord.id == connection_id)
+        if user_id is not None:
+            statement = statement.where(HubSpotConnectionRecord.user_id == user_id)
+        connection = await session.scalar(statement)
         if connection is None:
             raise RuntimeError("HubSpot connection persistence failed")
         return connection

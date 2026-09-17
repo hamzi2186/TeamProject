@@ -1,9 +1,42 @@
 from functools import lru_cache
+from ipaddress import ip_address
 from typing import Literal
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def validate_hubspot_redirect_uri(value: str, *, app_env: str) -> str:
+    """Validate the browser-facing OAuth callback without rewriting it."""
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(
+            "HUBSPOT_REDIRECT_URI must be a valid absolute HTTP/HTTPS callback URL"
+        ) from exc
+
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or not parsed.path:
+        raise ValueError(
+            "HUBSPOT_REDIRECT_URI must be an absolute HTTP/HTTPS callback URL with a path"
+        )
+    if parsed.username or parsed.password or port is not None and not 1 <= port <= 65535:
+        raise ValueError("HUBSPOT_REDIRECT_URI must not include credentials and must use a valid port")
+
+    if app_env.lower() in {"development", "dev", "local"}:
+        hostname = parsed.hostname.lower()
+        try:
+            ip_address(hostname)
+            browser_reachable = True
+        except ValueError:
+            browser_reachable = hostname == "localhost" or "." in hostname
+        if not browser_reachable:
+            raise ValueError(
+                "HUBSPOT_REDIRECT_URI must use a browser-reachable host in local development "
+                "(for example localhost, a LAN IP, or a DNS name), not a Docker-only hostname"
+            )
+    return value
 
 
 class TwilioNumberRoute(BaseModel):
@@ -88,6 +121,15 @@ class Settings(BaseSettings):
         if not value.strip():
             raise ValueError("Required TPI configuration is empty")
         return value
+
+    @field_validator("hubspot_redirect_uri")
+    @classmethod
+    def redirect_uri_must_be_browser_reachable(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
+        return validate_hubspot_redirect_uri(
+            value, app_env=str(info.data.get("app_env", "development"))
+        )
 
     @field_validator("database_url")
     @classmethod

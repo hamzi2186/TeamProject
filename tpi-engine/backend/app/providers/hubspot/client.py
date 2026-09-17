@@ -148,7 +148,11 @@ class HubSpotClient:
             raise ProviderTemporaryError("HubSpot service failed temporarily")
         if response.status_code >= 400:
             if operation == "exchange":
-                raise TokenExchangeError("HubSpot authorization code exchange failed")
+                raise TokenExchangeError(
+                    "HubSpot authorization code exchange failed. Verify that "
+                    "HUBSPOT_REDIRECT_URI exactly matches the redirect URI registered in HubSpot "
+                    "and that its callback host is browser-reachable."
+                )
             if operation == "refresh":
                 raise TokenRefreshError("HubSpot token refresh failed")
             if response.status_code == 400:

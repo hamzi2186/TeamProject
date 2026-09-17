@@ -1,5 +1,6 @@
 import { CheckCircle2, Download, ExternalLink, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { HubSpotContact, HubSpotStatus, ImportResult, hubspotApi } from "../api/hubspot";
 
 function readiness(contact: HubSpotContact) {
@@ -8,6 +9,7 @@ function readiness(contact: HubSpotContact) {
 }
 
 export function HubSpotPage() {
+  const [searchParams] = useSearchParams();
   const [status, setStatus] = useState<HubSpotStatus | null>(null);
   const [contacts, setContacts] = useState<HubSpotContact[]>([]);
   const [nextAfter, setNextAfter] = useState<string | null>(null);
@@ -17,6 +19,15 @@ export function HubSpotPage() {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<ImportResult | null>(null);
+  const callbackOutcome = searchParams.get("hubspot");
+  const callbackReason = searchParams.get("reason");
+  const callbackError = callbackReason === "configuration"
+    ? "HubSpot could not complete authorization. Verify HUBSPOT_REDIRECT_URI exactly matches the redirect URI registered in HubSpot and that its callback host is browser-reachable."
+    : callbackReason === "state"
+      ? "HubSpot authorization expired or was already used. Start the connection again."
+      : callbackReason === "denied"
+        ? "HubSpot authorization was denied."
+        : "HubSpot authorization could not be completed. Start the connection again.";
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -61,6 +72,8 @@ export function HubSpotPage() {
     <section className="page">
       <header className="page-header"><div><p className="eyebrow dark">Integrations</p><h1>HubSpot</h1><p>Connect your CRM and turn contacts into canonical T Rex leads.</p></div><button className="secondary" onClick={load}><RefreshCw size={16} />Refresh</button></header>
       {error && <div className="notice error" role="alert">{error}</div>}
+      {callbackOutcome === "connected" && <div className="notice success" role="status">HubSpot connected successfully.</div>}
+      {callbackOutcome === "error" && <div className="notice error" role="alert">{callbackError}</div>}
       {!status?.connected ? (
         <div className="empty-card"><div className="integration-icon">H</div><h2>HubSpot is not connected</h2><p>Connect your CRM to import leads into T Rex.</p><button className="primary action" disabled={working} onClick={connect}>Connect HubSpot<ExternalLink size={16} /></button></div>
       ) : (

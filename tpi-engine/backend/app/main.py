@@ -13,7 +13,6 @@ from app.api.sms_delivery import router as sms_delivery_router
 from app.api.twilio_webhooks import router as twilio_webhooks_router
 from app.api.vapi_webhooks import router as vapi_webhook_router
 from app.core.config import get_settings
-from app.providers.hubspot.schemas import CallbackResponse
 
 settings = get_settings()
 app = FastAPI(title="T Rex TPI", version="0.1.0")
@@ -36,7 +35,6 @@ app.add_api_route(
     hubspot_callback_path,
     hubspot_callback,
     methods=["GET"],
-    response_model=CallbackResponse,
     tags=["hubspot-oauth"],
 )
 

@@ -1,4 +1,5 @@
 import json
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
@@ -8,8 +9,11 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
+from sqlalchemy.dialects import postgresql
 
 from app.main import app
+from app.api.hubspot import callback
+from app.core.config import validate_hubspot_redirect_uri
 from app.providers.hubspot.client import CONTACTS_URL, TOKEN_URL, HubSpotClient
 from app.providers.hubspot.crypto import TokenCipher
 from app.providers.hubspot.errors import (
@@ -29,6 +33,7 @@ from app.providers.hubspot.schemas import (
     NormalizedContact,
 )
 from app.providers.hubspot.service import HubSpotService, get_hubspot_service
+from app.providers.hubspot.repository import SqlAlchemyConnectionRepository
 
 
 class FakeRedis:
@@ -87,6 +92,28 @@ async def test_state_expiry_is_rejected():
     redis.expired.add(f"tpi:hubspot:oauth-state:{state}")
     with pytest.raises(InvalidOAuthStateError):
         await store.consume(state)
+
+
+@pytest.mark.parametrize(
+    "redirect_uri",
+    [
+        "not-a-url",
+        "ftp://localhost/callback",
+        "http://tpi:8001/callback",
+    ],
+)
+def test_redirect_uri_rejects_invalid_or_docker_only_local_hosts(redirect_uri):
+    with pytest.raises(ValueError, match="HUBSPOT_REDIRECT_URI"):
+        validate_hubspot_redirect_uri(redirect_uri, app_env="development")
+
+
+def test_redirect_uri_accepts_browser_reachable_local_and_production_hosts():
+    assert validate_hubspot_redirect_uri(
+        "http://localhost:8001/api/v1/hubspot/callback", app_env="development"
+    ) == "http://localhost:8001/api/v1/hubspot/callback"
+    assert validate_hubspot_redirect_uri(
+        "https://hubspot.example.test/callback", app_env="production"
+    ) == "https://hubspot.example.test/callback"
 
 
 def test_crypto_round_trip():
@@ -180,6 +207,9 @@ async def test_provider_error_mapping(status: int, operation: str, error_type: t
         else:
             await client.get_contacts("bad-access")
     assert "provider detail" not in str(captured.value)
+    if operation == "exchange":
+        assert "HUBSPOT_REDIRECT_URI" in str(captured.value)
+        assert "browser-reachable" in str(captured.value)
 
 
 class FakeRepository:
@@ -187,18 +217,22 @@ class FakeRepository:
         self.connection = connection
         self.refresh_updates = 0
         self.status_updates: list[str] = []
+        self.refresh_update_user_ids = []
+        self.status_update_user_ids = []
 
     async def latest_for_user(self, _user_id):
         return self.connection
 
-    async def update_tokens(self, connection_id, **values):
+    async def update_tokens(self, connection_id, *, user_id, **values):
         self.refresh_updates += 1
+        self.refresh_update_user_ids.append(user_id)
         for key, value in values.items():
             setattr(self.connection, key, value)
         return self.connection
 
-    async def set_status(self, _connection_id, status):
+    async def set_status(self, _connection_id, *, user_id, status):
         self.status_updates.append(status)
+        self.status_update_user_ids.append(user_id)
 
 
 class RefreshingClient:
@@ -223,6 +257,7 @@ async def test_expired_access_token_is_refreshed_and_persisted():
     cipher = TokenCipher(Fernet.generate_key().decode())
     connection = SimpleNamespace(
         id=uuid4(),
+        user_id=uuid4(),
         status="connected",
         expires_at=datetime.now(UTC) - timedelta(seconds=1),
         encrypted_access_token=cipher.encrypt("old-access"),
@@ -243,8 +278,173 @@ async def test_expired_access_token_is_refreshed_and_persisted():
     await service.contacts(uuid4())
     assert provider.refresh_calls == 1
     assert repository.refresh_updates == 1
+    assert repository.refresh_update_user_ids == [connection.user_id]
     assert provider.contacts_access_token == "new-access"
     assert connection.encrypted_access_token != "new-access"
+
+
+class OAuthRepository:
+    def __init__(self) -> None:
+        self.upserts = []
+        self.connections = {}
+
+    async def upsert(self, **values):
+        self.upserts.append(values)
+        record = SimpleNamespace(
+            id=uuid4(),
+            user_id=values["user_id"],
+            hubspot_portal_id=values["portal_id"],
+            encrypted_access_token=values["encrypted_access_token"],
+            encrypted_refresh_token=values["encrypted_refresh_token"],
+            expires_at=values["expires_at"],
+            scopes=values["scopes"],
+            status="connected",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        self.connections[record.user_id] = record
+        return record
+
+    async def latest_for_user(self, user_id):
+        return self.connections.get(user_id)
+
+
+class CompletingClient:
+    async def exchange_code(self, _code):
+        return HubSpotTokenSet(
+            access_token="test-access", refresh_token="test-refresh", expires_in=1800
+        )
+
+    async def get_portal_id(self, _access_token):
+        return "portal-123"
+
+
+def oauth_service(repository, state_store):
+    return HubSpotService(
+        client=CompletingClient(),
+        repository=repository,
+        state_store=state_store,
+        cipher=TokenCipher(Fernet.generate_key().decode()),
+        client_id="client",
+        redirect_uri="http://localhost:8001/api/v1/hubspot/callback",
+        scopes=["crm.objects.contacts.read"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_persists_the_user_from_one_time_state():
+    repository = OAuthRepository()
+    state_store = OAuthStateStore(FakeRedis())
+    service = oauth_service(repository, state_store)
+    user_a = uuid4()
+    user_b = uuid4()
+
+    state_a = await state_store.create(user_a)
+    await service.complete_oauth(state=state_a, code="test-code", provider_error=None)
+
+    assert repository.upserts[0]["user_id"] == user_a
+    assert (await service.connection_status(user_b)).connected is False
+    with pytest.raises(InvalidOAuthStateError):
+        await service.complete_oauth(state=state_a, code="test-code", provider_error=None)
+
+
+@pytest.mark.asyncio
+async def test_each_user_state_creates_only_that_users_connection_even_for_same_portal():
+    repository = OAuthRepository()
+    state_store = OAuthStateStore(FakeRedis())
+    service = oauth_service(repository, state_store)
+    user_a = uuid4()
+    user_b = uuid4()
+
+    state_a = await state_store.create(user_a)
+    state_b = await state_store.create(user_b)
+    await service.complete_oauth(state=state_b, code="test-code", provider_error=None)
+    await service.complete_oauth(state=state_a, code="test-code", provider_error=None)
+
+    assert [entry["user_id"] for entry in repository.upserts] == [user_b, user_a]
+    assert set(repository.connections) == {user_a, user_b}
+
+
+class CallbackService:
+    def __init__(self, error=None):
+        self.error = error
+
+    async def complete_oauth(self, **_kwargs):
+        if self.error:
+            raise self.error
+        return None
+
+
+@pytest.mark.asyncio
+async def test_callback_redirects_with_non_sensitive_success_or_configuration_error(monkeypatch):
+    import app.api.hubspot as hubspot_api
+
+    monkeypatch.setattr(
+        hubspot_api, "get_settings", lambda: SimpleNamespace(frontend_url="http://localhost:5173")
+    )
+    success = await callback(state="opaque-state", code="opaque-code", service=CallbackService())
+    failure = await callback(
+        state="opaque-state",
+        code="opaque-code",
+        service=CallbackService(TokenExchangeError("sanitized exchange failure")),
+    )
+
+    assert success.status_code == 303
+    assert success.headers["location"] == "http://localhost:5173/hubspot?hubspot=connected"
+    assert failure.status_code == 303
+    assert failure.headers["location"] == "http://localhost:5173/hubspot?hubspot=error&reason=configuration"
+    assert "opaque" not in failure.headers["location"]
+
+
+class CapturingSession:
+    def __init__(self, connection):
+        self.connection = connection
+        self.statements = []
+
+    async def execute(self, statement):
+        self.statements.append(statement)
+
+    async def commit(self):
+        pass
+
+    async def scalar(self, statement):
+        self.statements.append(statement)
+        return self.connection
+
+
+class CapturingFactory:
+    def __init__(self, session):
+        self.session = session
+
+    @asynccontextmanager
+    async def __call__(self):
+        yield self.session
+
+
+@pytest.mark.asyncio
+async def test_repository_token_and_status_updates_are_constrained_to_connection_owner():
+    user_id = uuid4()
+    connection_id = uuid4()
+    session = CapturingSession(SimpleNamespace(id=connection_id, user_id=user_id))
+    repository = SqlAlchemyConnectionRepository(CapturingFactory(session))
+
+    await repository.update_tokens(
+        connection_id,
+        user_id=user_id,
+        encrypted_access_token="encrypted-access",
+        encrypted_refresh_token="encrypted-refresh",
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+        scopes=["crm.objects.contacts.read"],
+    )
+    await repository.set_status(connection_id, user_id=user_id, status="disconnected")
+
+    statements = [
+        str(statement.compile(dialect=postgresql.dialect())) for statement in session.statements
+    ]
+    updates = [statement for statement in statements if statement.startswith("UPDATE")]
+    assert len(updates) == 2
+    assert all("hubspot_connections.user_id" in statement for statement in updates)
+    assert all("SET user_id" not in statement for statement in updates)
 
 
 class FakeApiService:

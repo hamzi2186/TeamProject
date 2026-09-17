@@ -117,7 +117,9 @@ class HubSpotService:
         try:
             return await self._client.get_contacts(access_token, after=after, limit=limit)
         except ProviderAuthError as exc:
-            await self._repository.set_status(connection.id, "disconnected")
+            await self._repository.set_status(
+                connection.id, user_id=connection.user_id, status="disconnected"
+            )
             raise ConnectionRevokedError("HubSpot connection was revoked") from exc
 
     async def _valid_access_token(self, connection: HubSpotConnectionRecord) -> str:
@@ -131,11 +133,14 @@ class HubSpotService:
         try:
             refreshed = await self._client.refresh(refresh_token)
         except (TokenRefreshError, ProviderAuthError) as exc:
-            await self._repository.set_status(connection.id, "disconnected")
+            await self._repository.set_status(
+                connection.id, user_id=connection.user_id, status="disconnected"
+            )
             raise ConnectionRevokedError("HubSpot refresh credential is invalid") from exc
         next_refresh = refreshed.refresh_token or refresh_token
         saved = await self._repository.update_tokens(
             connection.id,
+            user_id=connection.user_id,
             encrypted_access_token=self._cipher.encrypt(refreshed.access_token),
             encrypted_refresh_token=self._cipher.encrypt(next_refresh),
             expires_at=now + timedelta(seconds=refreshed.expires_in),
