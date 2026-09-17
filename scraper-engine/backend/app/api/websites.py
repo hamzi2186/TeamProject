@@ -14,7 +14,9 @@ from app.schemas.scraper import (
     NormalizeRequest,
     NormalizeResponse,
     PageResponse,
+    ProcessingStatusResponse,
     WebsiteResponse,
+    WebsiteStatusResponse,
 )
 from app.services.ssrf import UnsafeTargetError, validate_public_url
 from app.services.urls import URLValidationError, normalize_website_url
@@ -40,6 +42,71 @@ def website_response(summary: WebsiteSummary) -> WebsiteResponse:
         chunk_count=summary.chunk_count,
         leads_using_kb=summary.leads_using_kb,
     )
+
+
+def processing_status(summary: WebsiteSummary, job) -> ProcessingStatusResponse:
+    kb_status = (summary.kb_status or "NOT_CREATED").upper()
+    job_status = (job.status if job else "").upper()
+    if job_status == "FAILED":
+        stage = "FAILED"
+    elif job_status == "QUEUED":
+        stage = "QUEUED"
+    elif job_status == "PARTIAL" or kb_status == "PARTIAL":
+        stage = "PARTIAL"
+    elif job_status == "COMPLETED" or kb_status == "READY":
+        stage = "READY"
+    elif job_status == "RUNNING":
+        if kb_status == "EMBEDDING":
+            stage = "EMBEDDING"
+        elif kb_status == "PROCESSING":
+            stage = "EXTRACTING"
+        else:
+            stage = "CRAWLING"
+    elif kb_status == "FAILED":
+        stage = "FAILED"
+    elif kb_status == "EMBEDDING":
+        stage = "EMBEDDING"
+    elif kb_status == "PROCESSING":
+        stage = "EXTRACTING"
+    elif kb_status in {"CRAWLING", "REFRESHING"}:
+        stage = "CRAWLING"
+    else:
+        stage = "NOT_STARTED"
+
+    error = None
+    if stage == "FAILED":
+        error = _safe_processing_error(job.error_code if job else None)
+    elif stage == "PARTIAL" and job and job.partial_reason:
+        error = "The website was partially processed; some pages could not be included."
+
+    terminal_success = stage in {"READY", "PARTIAL"}
+    return ProcessingStatusResponse(
+        knowledge_base_status=kb_status,
+        processing_stage=stage,
+        pages_discovered=job.pages_discovered if job else 0,
+        pages_processed=job.pages_crawled if job else summary.page_count,
+        pages_succeeded=job.pages_indexed if job else summary.page_count,
+        pages_failed=None,
+        chunks_created=job.chunks_generated if job else summary.chunk_count,
+        embeddings_created=(job.chunks_generated if job and terminal_success else None),
+        started_at=job.started_at if job else None,
+        updated_at=job.updated_at if job else summary.website.updated_at,
+        completed_at=job.completed_at if job else None,
+        error=error,
+    )
+
+
+def _safe_processing_error(error_code: str | None) -> str:
+    code = (error_code or "").upper()
+    if code == "TASK_DISPATCH_FAILED":
+        return "Website ingestion could not be queued. Please try again."
+    if "EMBEDDING" in code or "TPI" in code:
+        return "Website embeddings could not be generated. Please try again."
+    if "URL" in code:
+        return "The website URL could not be processed."
+    if "CRAWL" in code or "HTTP" in code:
+        return "Website content could not be processed. Please try again."
+    return "Website knowledge processing failed. Please try again."
 
 
 async def validated_normalization(raw_url: str):
@@ -142,20 +209,25 @@ async def get_website(
     return website_response(summary)
 
 
-@router.get("/websites/{website_id}/status")
+@router.get("/websites/{website_id}/status", response_model=WebsiteStatusResponse)
 async def website_status(
     website_id: UUID,
     current: Annotated[AuthenticatedUser, Depends(get_current_user)],
     repository: Annotated[ScraperRepository, Depends(get_repository)],
-) -> dict:
+) -> WebsiteStatusResponse:
     summary = await repository.website_summary(current.user_id, website_id)
     if summary is None:
         raise HTTPException(404, "Website not found")
     job = await repository.latest_job(current.user_id, website_id)
-    return {
-        "website": website_response(summary),
-        "job": JobResponse.model_validate(job) if job else None,
-    }
+    processing = processing_status(summary, job)
+    job_response = JobResponse.model_validate(job) if job else None
+    if job_response and job_response.status == "FAILED":
+        job_response.error_message = processing.error
+    return WebsiteStatusResponse(
+        website=website_response(summary),
+        job=job_response,
+        processing=processing,
+    )
 
 
 @router.get("/websites/{website_id}/pages", response_model=list[PageResponse])

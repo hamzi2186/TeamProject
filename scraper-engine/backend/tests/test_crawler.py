@@ -14,6 +14,11 @@ async def public_validator(url: str):
 
 @pytest.mark.asyncio
 async def test_crawler_discovers_sitemap_relative_links_and_prevents_loops():
+    progress = []
+
+    async def record_progress(discovered, processed, succeeded):
+        progress.append((discovered, processed, succeeded))
+
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/robots.txt":
@@ -59,6 +64,7 @@ async def test_crawler_discovers_sitemap_relative_links_and_prevents_loops():
         minimum_text_characters=20,
         enable_playwright_fallback=False,
         validator=public_validator,
+        progress_callback=record_progress,
     )
     result = await crawler.crawl("https://example.com/")
     assert {page.final_url for page in result.pages} == {
@@ -66,7 +72,10 @@ async def test_crawler_discovers_sitemap_relative_links_and_prevents_loops():
         "https://example.com/about",
     }
     assert result.discovered_count == 2
+    assert result.processed_count == 2
     assert result.partial_reason is None
+    assert progress[0] == (2, 0, 0)
+    assert progress[-1] == (2, 2, 2)
 
 
 @pytest.mark.asyncio

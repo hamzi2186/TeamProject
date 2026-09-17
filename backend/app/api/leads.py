@@ -21,13 +21,20 @@ router = APIRouter(prefix="/api/v1/leads", tags=["leads"])
 
 
 def map_knowledge_base_status(
-    website: dict, job: dict | None, lead_website_url: str | None
+    website: dict,
+    job: dict | None,
+    lead_website_url: str | None,
+    processing: dict | None = None,
 ) -> LeadKnowledgeBaseStatusResponse:
     kb_status = (website.get("kb_status") or "").upper()
     crawl_status = (website.get("crawl_status") or "").upper()
     job_status = (job.get("status") if job else "").upper()
 
-    if job_status == "QUEUED":
+    if processing:
+        status = processing.get("processing_stage") or "NOT_STARTED"
+    elif job_status == "QUEUED":
+        status = "QUEUED"
+    elif kb_status == "PENDING":
         status = "QUEUED"
     elif crawl_status == "CRAWLING" or kb_status == "CRAWLING":
         status = "CRAWLING"
@@ -46,7 +53,11 @@ def map_knowledge_base_status(
     else:
         status = "NOT_CREATED"
 
-    error_message = (job.get("error_message") if job else None) or website.get("last_error")
+    error_message = processing.get("error") if processing else None
+    if not processing and status == "FAILED":
+        error_message = "Website knowledge processing failed. Please try again."
+    elif not processing and status == "PARTIAL":
+        error_message = "The website was partially processed; some pages could not be included."
 
     return LeadKnowledgeBaseStatusResponse(
         has_website=bool(website.get("original_url") or lead_website_url),
@@ -54,8 +65,21 @@ def map_knowledge_base_status(
         website_id=website.get("id"),
         knowledge_base_id=website.get("knowledge_base_id"),
         status=status,
+        knowledge_base_status=(
+            processing.get("knowledge_base_status") if processing else kb_status or "NOT_CREATED"
+        ),
+        processing_stage=processing.get("processing_stage") if processing else status,
+        pages_discovered=processing.get("pages_discovered", 0) if processing else 0,
+        pages_processed=processing.get("pages_processed", 0) if processing else 0,
+        pages_succeeded=processing.get("pages_succeeded", 0) if processing else 0,
+        pages_failed=processing.get("pages_failed") if processing else None,
         page_count=website.get("page_count", 0),
         chunk_count=website.get("chunk_count", 0),
+        chunks_created=processing.get("chunks_created", 0) if processing else 0,
+        embeddings_created=processing.get("embeddings_created") if processing else None,
+        started_at=processing.get("started_at") if processing else None,
+        updated_at=processing.get("updated_at") if processing else None,
+        completed_at=processing.get("completed_at") if processing else None,
         last_indexed_at=website.get("last_crawled_at"),
         error_message=error_message,
     )
@@ -112,7 +136,10 @@ async def get_lead_knowledge_base(
             raise HTTPException(exc.status_code, str(exc)) from exc
         if status_data:
             return map_knowledge_base_status(
-                status_data["website"], status_data.get("job"), lead.website_url
+                status_data["website"],
+                status_data.get("job"),
+                lead.website_url,
+                status_data.get("processing"),
             )
 
     if lead.website_url:
@@ -130,7 +157,10 @@ async def get_lead_knowledge_base(
                 raise HTTPException(exc.status_code, str(exc)) from exc
             if status_data:
                 return map_knowledge_base_status(
-                    status_data["website"], status_data.get("job"), lead.website_url
+                    status_data["website"],
+                    status_data.get("job"),
+                    lead.website_url,
+                    status_data.get("processing"),
                 )
 
     return LeadKnowledgeBaseStatusResponse(
@@ -139,6 +169,8 @@ async def get_lead_knowledge_base(
         website_id=None,
         knowledge_base_id=None,
         status="NOT_CREATED",
+        knowledge_base_status="NOT_CREATED",
+        processing_stage="NOT_STARTED",
         page_count=0,
         chunk_count=0,
     )
@@ -179,6 +211,7 @@ async def build_lead_knowledge_base(
         status_data["website"] if status_data else website,
         status_data.get("job") if status_data else None,
         target_url,
+        status_data.get("processing") if status_data else None,
     )
 
 
@@ -219,6 +252,7 @@ async def refresh_lead_knowledge_base(
         status_data["website"] if status_data else website,
         status_data.get("job") if status_data else None,
         lead.website_url,
+        status_data.get("processing") if status_data else None,
     )
 
 

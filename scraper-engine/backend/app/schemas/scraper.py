@@ -65,6 +65,27 @@ class JobResponse(BaseModel):
     updated_at: datetime
 
 
+class ProcessingStatusResponse(BaseModel):
+    knowledge_base_status: str
+    processing_stage: str
+    pages_discovered: int
+    pages_processed: int
+    pages_succeeded: int
+    pages_failed: int | None = None
+    chunks_created: int
+    embeddings_created: int | None = None
+    started_at: datetime | None = None
+    updated_at: datetime | None = None
+    completed_at: datetime | None = None
+    error: str | None = None
+
+
+class WebsiteStatusResponse(BaseModel):
+    website: WebsiteResponse
+    job: JobResponse | None
+    processing: ProcessingStatusResponse
+
+
 class KnowledgeBaseResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID

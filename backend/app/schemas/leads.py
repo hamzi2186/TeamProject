@@ -35,9 +35,20 @@ class LeadKnowledgeBaseStatusResponse(BaseModel):
     website_url: str | None = None
     website_id: UUID | None = None
     knowledge_base_id: UUID | None = None
-    status: str  # NOT_CREATED, QUEUED, CRAWLING, PROCESSING / EMBEDDING, READY, PARTIAL, FAILED
+    status: str
+    knowledge_base_status: str = "NOT_CREATED"
+    processing_stage: str = "NOT_STARTED"
+    pages_discovered: int = 0
+    pages_processed: int = 0
+    pages_succeeded: int = 0
+    pages_failed: int | None = None
     page_count: int = 0
     chunk_count: int = 0
+    chunks_created: int = 0
+    embeddings_created: int | None = None
+    started_at: datetime | None = None
+    updated_at: datetime | None = None
+    completed_at: datetime | None = None
     last_indexed_at: datetime | None = None
     error_message: str | None = None
 

@@ -2,11 +2,38 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import get_repository, get_task_dispatcher
+from app.api.websites import processing_status
 from app.auth.dependencies import AuthenticatedUser, get_current_user
 from app.main import app
+
+
+def make_job(status="QUEUED", **overrides):
+    values = {
+        "id": uuid4(),
+        "website_id": uuid4(),
+        "knowledge_base_id": uuid4(),
+        "status": status,
+        "is_refresh": False,
+        "celery_task_id": None,
+        "attempt_count": 0,
+        "pages_discovered": 0,
+        "pages_crawled": 0,
+        "pages_indexed": 0,
+        "chunks_generated": 0,
+        "error_code": None,
+        "error_message": None,
+        "partial_reason": None,
+        "started_at": None,
+        "completed_at": None,
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 class FakeDispatcher:
@@ -34,8 +61,9 @@ class FakeRepository:
             updated_at=datetime.now(UTC),
         )
         self.kb = SimpleNamespace(id=uuid4(), status="PENDING")
-        self.job = SimpleNamespace(
-            id=uuid4(), status="QUEUED", celery_task_id=None, error_message=None
+        self.job = make_job(
+            website_id=self.website.id,
+            knowledge_base_id=self.kb.id,
         )
         self.user_ids = []
         self.task_ids = []
@@ -57,7 +85,8 @@ class FakeRepository:
         self.dispatch_failures.append(job_id)
 
     async def website_summary(self, user_id, _website_id):
-        assert user_id == self.owner_id
+        if user_id != self.owner_id:
+            return None
         return SimpleNamespace(
             website=self.website,
             knowledge_base_id=self.kb.id,
@@ -66,6 +95,9 @@ class FakeRepository:
             chunk_count=0,
             leads_using_kb=0,
         )
+
+    async def latest_job(self, user_id, _website_id):
+        return self.job if user_id == self.owner_id else None
 
 
 def test_customer_api_requires_authentication():
@@ -167,8 +199,9 @@ def test_dispatch_failure_closes_job_and_later_ingest_dispatches_fresh_job(monke
 
         async def create_site_kb_job(self, *, user_id, **_kwargs):
             self.user_ids.append(user_id)
-            self.job = SimpleNamespace(
-                id=uuid4(), status="QUEUED", celery_task_id=None, error_message=None
+            self.job = make_job(
+                website_id=self.website.id,
+                knowledge_base_id=self.kb.id,
             )
             self.jobs.append(self.job)
             return self.website, self.kb, self.job, False
@@ -205,3 +238,94 @@ def test_dispatch_failure_closes_job_and_later_ingest_dispatches_fresh_job(monke
         assert dispatcher.job_ids == [failed_job.id, fresh_job.id]
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(
+    ("job_status", "kb_status", "expected_stage"),
+    [
+        ("QUEUED", "PENDING", "QUEUED"),
+        ("RUNNING", "CRAWLING", "CRAWLING"),
+        ("RUNNING", "PROCESSING", "EXTRACTING"),
+        ("RUNNING", "EMBEDDING", "EMBEDDING"),
+        ("COMPLETED", "READY", "READY"),
+        ("PARTIAL", "PARTIAL", "PARTIAL"),
+        ("FAILED", "FAILED", "FAILED"),
+    ],
+)
+def test_processing_status_maps_job_and_kb_lifecycle(job_status, kb_status, expected_stage):
+    repository = FakeRepository(uuid4())
+    repository.kb.status = kb_status
+    repository.job = make_job(
+        status=job_status,
+        website_id=repository.website.id,
+        knowledge_base_id=repository.kb.id,
+        pages_discovered=12,
+        pages_crawled=9,
+        pages_indexed=8,
+        chunks_generated=24,
+        error_code="CRAWLERROR" if job_status == "FAILED" else None,
+        partial_reason="Crawl page limit reached" if job_status == "PARTIAL" else None,
+    )
+
+    result = processing_status(
+        SimpleNamespace(
+            website=repository.website,
+            kb_status=kb_status,
+            page_count=8,
+            chunk_count=24,
+        ),
+        repository.job,
+    )
+
+    assert result.processing_stage == expected_stage
+    assert result.knowledge_base_status == kb_status
+    assert result.pages_discovered == 12
+    assert result.pages_processed == 9
+    assert result.pages_succeeded == 8
+    assert result.chunks_created == 24
+
+
+def test_status_endpoint_is_tenant_safe_and_sanitizes_failure_details():
+    owner = AuthenticatedUser(user_id=uuid4(), role="customer")
+    other = AuthenticatedUser(user_id=uuid4(), role="customer")
+    repository = FakeRepository(owner.user_id)
+    repository.kb.status = "FAILED"
+    repository.job = make_job(
+        status="FAILED",
+        website_id=repository.website.id,
+        knowledge_base_id=repository.kb.id,
+        error_code="UNEXPECTED_DATABASE_ERROR",
+        error_message="postgresql://private-user:private-password@private-host/database",
+    )
+    app.dependency_overrides[get_repository] = lambda: repository
+    client = TestClient(app)
+    try:
+        app.dependency_overrides[get_current_user] = lambda: owner
+        response = client.get(f"/api/v1/websites/{repository.website.id}/status")
+        assert response.status_code == 200
+        assert response.json()["processing"]["processing_stage"] == "FAILED"
+        assert response.json()["processing"]["error"] == (
+            "Website knowledge processing failed. Please try again."
+        )
+        assert "private-password" not in response.text
+
+        app.dependency_overrides[get_current_user] = lambda: other
+        assert client.get(f"/api/v1/websites/{repository.website.id}/status").status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_manual_and_automatic_jobs_share_processing_contract():
+    repository = FakeRepository(uuid4())
+    summary = SimpleNamespace(
+        website=repository.website,
+        kb_status="CRAWLING",
+        page_count=0,
+        chunk_count=0,
+    )
+    automatic = processing_status(summary, make_job(status="RUNNING", is_refresh=False))
+    manual = processing_status(summary, make_job(status="RUNNING", is_refresh=True))
+
+    assert automatic.model_dump(exclude={"updated_at"}) == manual.model_dump(
+        exclude={"updated_at"}
+    )

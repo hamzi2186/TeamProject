@@ -51,7 +51,7 @@ async def process_scrape_job(job_id: UUID) -> None:
             job.error_code = None
             job.error_message = None
             website.crawl_status = "CRAWLING"
-            kb.status = "REFRESHING" if previous_ready else "CRAWLING"
+            kb.status = "CRAWLING"
             await db.commit()
 
         fetcher = SafeHTTPFetcher(
@@ -59,12 +59,25 @@ async def process_scrape_job(job_id: UUID) -> None:
             user_agent=settings.crawl_user_agent,
             max_redirects=settings.crawl_max_redirects,
         )
+
+        async def persist_crawl_progress(
+            pages_discovered: int, pages_processed: int, _pages_succeeded: int
+        ) -> None:
+            async with SessionLocal() as progress_db:
+                progress_job = await progress_db.get(ScrapeJob, job_id)
+                if progress_job is None or progress_job.status != "RUNNING":
+                    return
+                progress_job.pages_discovered = pages_discovered
+                progress_job.pages_crawled = pages_processed
+                await progress_db.commit()
+
         crawler = WebsiteCrawler(
             fetcher=fetcher,
             max_pages=settings.crawl_max_pages,
             max_depth=settings.crawl_max_depth,
             minimum_text_characters=settings.minimum_page_text_characters,
             enable_playwright_fallback=settings.enable_playwright_fallback,
+            progress_callback=persist_crawl_progress,
         )
         tpi = create_tpi_embedding_client()
         async with SessionLocal() as db:
@@ -78,8 +91,8 @@ async def process_scrape_job(job_id: UUID) -> None:
             job = await db.get(ScrapeJob, job_id)
             kb = await db.get(KnowledgeBase, job.knowledge_base_id)
             job.pages_discovered = crawl.discovered_count
-            job.pages_crawled = len(crawl.pages)
-            kb.status = "PROCESSING" if not previous_ready else "REFRESHING"
+            job.pages_crawled = crawl.processed_count
+            kb.status = "PROCESSING"
             await db.commit()
 
         chunker = DeterministicChunker(
@@ -130,7 +143,8 @@ async def process_scrape_job(job_id: UUID) -> None:
                 if kb and kb.embedding_provider and kb.embedding_model and kb.embedding_dimension
                 else None
             )
-            kb.status = "EMBEDDING" if not previous_ready else "REFRESHING"
+            kb.status = "EMBEDDING"
+            job.pages_indexed = len(pages)
             job.chunks_generated = len(pending)
             await db.commit()
 

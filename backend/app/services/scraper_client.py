@@ -63,7 +63,7 @@ class ScraperClient:
             return None
         if response.status_code >= 400:
             raise ScraperClientError(
-                f"Scraper service returned error: {response.text}",
+                "Could not load website processing status",
                 status_code=response.status_code,
             )
         return response.json()

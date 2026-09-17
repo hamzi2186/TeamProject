@@ -52,6 +52,7 @@ class CrawledPage:
 class CrawlResult:
     pages: list[CrawledPage] = field(default_factory=list)
     discovered_count: int = 0
+    processed_count: int = 0
     errors: list[str] = field(default_factory=list)
     partial_reason: str | None = None
 
@@ -223,6 +224,7 @@ class WebsiteCrawler:
         enable_playwright_fallback: bool,
         renderer: Callable[..., Awaitable[str]] = render_page,
         validator: Callable[[str], Awaitable[list[str]]] = validate_public_url,
+        progress_callback: Callable[[int, int, int], Awaitable[None]] | None = None,
     ) -> None:
         self._fetcher = fetcher
         self._max_pages = max_pages
@@ -231,6 +233,7 @@ class WebsiteCrawler:
         self._playwright = enable_playwright_fallback
         self._renderer = renderer
         self._validator = validator
+        self._progress_callback = progress_callback
 
     async def crawl(self, seed_url: str) -> CrawlResult:
         await self._validator(seed_url)
@@ -271,6 +274,8 @@ class WebsiteCrawler:
         visited: set[str] = set()
         content_hashes: set[str] = set()
         retryable_failures = 0
+        if self._progress_callback:
+            await self._progress_callback(len(queued), 0, 0)
         while queue:
             if self._max_pages and len(visited) >= self._max_pages:
                 result.partial_reason = f"Crawl page limit of {self._max_pages} reached"
@@ -279,6 +284,8 @@ class WebsiteCrawler:
             if url in visited or depth > self._max_depth:
                 continue
             visited.add(url)
+            if self._progress_callback and len(visited) % 5 == 0:
+                await self._progress_callback(len(queued), len(visited), len(result.pages))
             if normalized_host(url) != origin_host:
                 continue
             if not robots.can_fetch("*", url):
@@ -340,6 +347,13 @@ class WebsiteCrawler:
                 )
             )
         result.discovered_count = len(queued)
+        result.processed_count = len(visited)
+        if self._progress_callback:
+            await self._progress_callback(
+                result.discovered_count,
+                result.processed_count,
+                len(result.pages),
+            )
         if not result.pages:
             if retryable_failures:
                 raise RetryableCrawlError("Website was temporarily unavailable")

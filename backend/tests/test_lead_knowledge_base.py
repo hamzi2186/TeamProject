@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.leads import map_knowledge_base_status
 from app.api.dependencies import get_lead_repository, get_scraper_client
 from app.auth.dependencies import AuthenticatedUser, get_current_user
 from app.main import app
@@ -263,6 +264,52 @@ def test_get_kb_status_when_partial(test_setup):
 
     assert res.status_code == 200
     assert res.json()["status"] == "PARTIAL"
+
+
+@pytest.mark.parametrize(
+    "stage",
+    ["QUEUED", "CRAWLING", "EXTRACTING", "EMBEDDING", "READY", "PARTIAL", "FAILED"],
+)
+def test_root_preserves_scraper_processing_contract(stage):
+    processing = {
+        "knowledge_base_status": "PARTIAL" if stage == "PARTIAL" else stage,
+        "processing_stage": stage,
+        "pages_discovered": 10,
+        "pages_processed": 8,
+        "pages_succeeded": 7,
+        "pages_failed": None,
+        "chunks_created": 20,
+        "embeddings_created": 20 if stage in {"READY", "PARTIAL"} else None,
+        "started_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
+        "completed_at": datetime.now(UTC) if stage in {"READY", "PARTIAL", "FAILED"} else None,
+        "error": "Website knowledge processing failed. Please try again."
+        if stage == "FAILED"
+        else None,
+    }
+
+    result = map_knowledge_base_status(
+        {
+            "id": uuid4(),
+            "original_url": "https://example.com",
+            "knowledge_base_id": uuid4(),
+            "kb_status": processing["knowledge_base_status"],
+            "page_count": 7,
+            "chunk_count": 20,
+        },
+        None,
+        "https://example.com",
+        processing,
+    )
+
+    assert result.status == stage
+    assert result.processing_stage == stage
+    assert result.pages_discovered == 10
+    assert result.pages_processed == 8
+    assert result.pages_succeeded == 7
+    assert result.chunks_created == 20
+    if stage == "FAILED":
+        assert result.error_message == "Website knowledge processing failed. Please try again."
 
 
 def test_refresh_knowledge_base(test_setup):
