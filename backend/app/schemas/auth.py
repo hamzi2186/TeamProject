@@ -9,6 +9,11 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=10, max_length=128)
 
 
+class RegisterResponse(BaseModel):
+    message: str
+    verification_email_sent: bool
+
+
 class EmailOtpRequest(BaseModel):
     email: EmailStr
     code: str = Field(pattern=r"^\d{6}$")

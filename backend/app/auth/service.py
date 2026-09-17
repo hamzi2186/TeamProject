@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.security import generate_otp, hash_token
 from app.models.auth import AppUser, AuthOtpCode
-from app.services.tpi_email import send_auth_email
+from app.services.tpi_email import EmailDeliveryError, send_auth_email
 
 
 def normalize_email(email: str) -> str:
@@ -19,7 +19,11 @@ async def issue_otp(db: AsyncSession, user: AppUser, purpose: str) -> None:
     now = datetime.now(UTC)
     latest = await db.scalar(
         select(AuthOtpCode)
-        .where(AuthOtpCode.user_id == user.id, AuthOtpCode.purpose == purpose)
+        .where(
+            AuthOtpCode.user_id == user.id,
+            AuthOtpCode.purpose == purpose,
+            AuthOtpCode.used_at.is_(None),
+        )
         .order_by(AuthOtpCode.created_at.desc())
         .limit(1)
     )
@@ -43,14 +47,18 @@ async def issue_otp(db: AsyncSession, user: AppUser, purpose: str) -> None:
         .values(used_at=now)
     )
     code = generate_otp()
-    db.add(
-        AuthOtpCode(
-            user_id=user.id,
-            purpose=purpose,
-            code_hash=hash_token(code),
-            expires_at=now + timedelta(minutes=settings.otp_expire_minutes),
-        )
+    otp = AuthOtpCode(
+        user_id=user.id,
+        purpose=purpose,
+        code_hash=hash_token(code),
+        expires_at=now + timedelta(minutes=settings.otp_expire_minutes),
     )
+    db.add(otp)
     await db.commit()
     template = "verify_email" if purpose == "verify_email" else "reset_password"
-    await send_auth_email(to=user.email, template=template, code=code)
+    try:
+        await send_auth_email(to=user.email, template=template, code=code)
+    except EmailDeliveryError:
+        otp.used_at = datetime.now(UTC)
+        await db.commit()
+        raise

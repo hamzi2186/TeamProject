@@ -91,15 +91,19 @@ async def test_legacy_login_upgrades_hash_and_subsequent_login_uses_argon2(monke
 @pytest.mark.asyncio
 async def test_registration_stores_argon2id_hash(monkeypatch):
     db = make_db(scalar=AsyncMock(return_value=None))
-    monkeypatch.setattr(auth_api, "get_settings", lambda: SimpleNamespace(app_env="development"))
+    issue_otp = AsyncMock()
+    monkeypatch.setattr(auth_api, "issue_otp", issue_otp)
 
-    await auth_api.register(
+    result = await auth_api.register(
         RegisterRequest(email="new@example.com", password="new password value"), db
     )
 
     user = db.add.call_args.args[0]
     assert user.credential.password_hash.startswith("$argon2id$")
     assert verify_password("new password value", user.credential.password_hash)
+    assert user.email_verified_at is None
+    issue_otp.assert_awaited_once_with(db, user, "verify_email")
+    assert result.verification_email_sent is True
 
 
 @pytest.mark.asyncio

@@ -26,10 +26,12 @@ from app.schemas.auth import (
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    RegisterResponse,
     ResetPasswordRequest,
     TokenResponse,
     UserResponse,
 )
+from app.services.tpi_email import EmailDeliveryError
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -68,10 +70,10 @@ async def create_session(db: AsyncSession, user: AppUser, response: Response) ->
     )
 
 
-@router.post("/register", status_code=201)
+@router.post("/register", status_code=201, response_model=RegisterResponse)
 async def register(
     payload: RegisterRequest, db: Annotated[AsyncSession, Depends(get_db)]
-) -> dict:
+) -> RegisterResponse:
     email = normalize_email(payload.email)
     if await db.scalar(select(AppUser.id).where(AppUser.email == email)):
         raise HTTPException(409, "An account with this email already exists")
@@ -80,12 +82,20 @@ async def register(
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    if get_settings().app_env != "production":
-        user.email_verified_at = datetime.now(UTC)
-        await db.commit()
-        return {"message": "Account created successfully. You can sign in now."}
-    await issue_otp(db, user, "verify_email")
-    return {"message": "Registration successful. Check your email for the verification code."}
+    try:
+        await issue_otp(db, user, "verify_email")
+    except EmailDeliveryError:
+        return RegisterResponse(
+            message=(
+                "Account created, but the verification email could not be delivered. "
+                "Use resend verification to try again."
+            ),
+            verification_email_sent=False,
+        )
+    return RegisterResponse(
+        message="Registration successful. Check your email for the verification code.",
+        verification_email_sent=True,
+    )
 
 
 @router.post("/verify-email")
@@ -109,7 +119,12 @@ async def resend_verification(
 ) -> dict:
     user = await db.scalar(select(AppUser).where(AppUser.email == normalize_email(payload.email)))
     if user and not user.email_verified_at:
-        await issue_otp(db, user, "verify_email")
+        try:
+            await issue_otp(db, user, "verify_email")
+        except EmailDeliveryError as exc:
+            raise HTTPException(
+                503, "Verification email delivery is temporarily unavailable. Please try again."
+            ) from exc
     return {"message": "If the account is eligible, a verification code has been sent"}
 
 

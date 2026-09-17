@@ -14,9 +14,14 @@ type Session = {
   user: AuthUser;
 };
 
+type RegistrationResult = {
+  message: string;
+  verification_email_sent: boolean;
+};
+
 export const authApi = {
   register: (email: string, password: string) =>
-    apiRequest<{ message: string }>("/api/v1/auth/register", {
+    apiRequest<RegistrationResult>("/api/v1/auth/register", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
