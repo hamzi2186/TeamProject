@@ -31,6 +31,11 @@ class ConnectRequest(BaseModel):
     user_id: UUID
 
 
+class TokenConnectRequest(BaseModel):
+    user_id: UUID
+    access_token: str
+
+
 class ConnectResponse(BaseModel):
     authorization_url: str
     expires_in: int

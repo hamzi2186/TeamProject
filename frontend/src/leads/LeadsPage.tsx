@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { callingApi } from "../api/calling";
 import { Lead, leadsApi } from "../api/leads";
+import { LiveCallModal } from "../features/calling/LiveCallModal";
 
 export function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -10,6 +11,12 @@ export function LeadsPage() {
   const [error, setError] = useState("");
   const [successNotice, setSuccessNotice] = useState("");
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null);
+  const [activeCall, setActiveCall] = useState<{
+    callId: string;
+    leadName: string;
+    phoneNumber: string;
+    companyName?: string;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,7 +41,7 @@ export function LeadsPage() {
     setSuccessNotice("");
 
     try {
-      await callingApi.startCall({
+      const res = await callingApi.startCall({
         lead_id: lead.id,
         phone_number: lead.phone,
         purpose: "Follow up with lead",
@@ -43,7 +50,16 @@ export function LeadsPage() {
           email: lead.email || "",
         },
       });
-      setSuccessNotice(`Outbound call queued for ${lead.display_name || lead.phone}. Check the Calling Engine dashboard.`);
+
+      const leadDisplayName = lead.display_name || (`${lead.first_name || ""} ${lead.last_name || ""}`.trim() || "Lead Contact");
+      setActiveCall({
+        callId: res.data.call_id,
+        leadName: leadDisplayName,
+        phoneNumber: lead.phone,
+        companyName: lead.website_url || undefined,
+      });
+
+      setSuccessNotice(`Active AI voice call initiated with ${leadDisplayName}.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not start call.");
     } finally {
@@ -143,6 +159,19 @@ export function LeadsPage() {
             </table>
           </div>
         </div>
+      )}
+
+      {activeCall && (
+        <LiveCallModal
+          callId={activeCall.callId}
+          leadName={activeCall.leadName}
+          phoneNumber={activeCall.phoneNumber}
+          companyName={activeCall.companyName}
+          onClose={() => {
+            setActiveCall(null);
+            void load();
+          }}
+        />
       )}
     </section>
   );

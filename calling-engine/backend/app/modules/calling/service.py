@@ -1,5 +1,5 @@
 from typing import Any, Protocol
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -85,29 +85,80 @@ class CallingService:
 
     async def _auto_advance_simulated(self, call: CallRecord) -> CallRecord:
         now = datetime.now(timezone.utc)
-        if call.status == "QUEUED" and call.provider_call_id and call.provider_call_id.startswith("vapi-sim-"):
-            diff = (now - call.started_at).total_seconds() if call.started_at else 10
-            if diff >= 3:
-                transcript = (
-                    "AI (T Rex Voice Assistant): Hello, this is Alex calling from T Rex CRM on behalf of the sales automation team. Am I speaking with the business owner?\n"
-                    "Lead: Yes, hello! I can hear you. What is this call regarding?\n"
-                    "AI (T Rex Voice Assistant): We noticed your interest in automating lead intelligence, omnichannel outreach, and voice follow-ups. We wanted to see if scheduling a quick product demo makes sense for your team.\n"
-                    "Lead: That sounds great actually. We definitely need a way to follow up with leads automatically without manual dialing.\n"
-                    "AI (T Rex Voice Assistant): Excellent! I have scheduled our product specialist for a 15-minute demo tomorrow. You will receive the calendar invitation shortly.\n"
-                    "Lead: Perfect, thank you!\n"
-                    "AI (T Rex Voice Assistant): Thank you, have a wonderful day ahead!"
-                )
+        if (
+            call.provider_call_id
+            and call.provider_call_id.startswith("vapi-sim-")
+            and call.status in ("QUEUED", "RINGING", "IN_PROGRESS")
+        ):
+            diff = (now - call.started_at).total_seconds() if call.started_at else 0
+
+            simulated_dialogue = [
+                (2, "Alex (AI Voice Assistant)", "Hello! This is Alex calling from T Rex CRM on behalf of the sales outreach team. Am I speaking with the business owner?"),
+                (8, "Lead", "Yes, hello! I can hear you clearly. What is this call regarding?"),
+                (15, "Alex (AI Voice Assistant)", "We noticed your company's interest in automating lead intelligence, omnichannel outreach, and voice follow-ups. We wanted to see if scheduling a quick product demo makes sense for your team."),
+                (24, "Lead", "That sounds great actually. We definitely need a way to follow up with new leads automatically without manual dialing."),
+                (32, "Alex (AI Voice Assistant)", "Excellent! I have scheduled our product specialist for a 15-minute demo tomorrow. You will receive the calendar invitation shortly."),
+                (38, "Lead", "Perfect, thank you!"),
+                (42, "Alex (AI Voice Assistant)", "Thank you so much, have a wonderful day ahead!"),
+            ]
+
+            if diff < 3:
+                if call.status != "RINGING":
+                    call = call.model_copy(update={"status": "RINGING"})
+                    await self.repository.save(call)
+            elif diff < 45:
+                active_turns = [f"{speaker}: {text}" for t, speaker, text in simulated_dialogue if t <= diff]
+                transcript = "\n".join(active_turns)
+                call = call.model_copy(update={
+                    "status": "IN_PROGRESS",
+                    "transcript": transcript,
+                    "duration_seconds": int(diff),
+                })
+                await self.repository.save(call)
+            else:
+                transcript = "\n".join([f"{speaker}: {text}" for _, speaker, text in simulated_dialogue])
                 summary = "Lead answered outbound AI call, confirmed high interest in CRM automation and lead follow-up, and agreed to a 15-minute demonstration."
                 call = call.model_copy(update={
                     "status": "COMPLETED",
                     "outcome": "INTERESTED",
-                    "duration_seconds": 65,
-                    "ended_at": now,
+                    "duration_seconds": 45,
+                    "ended_at": call.started_at + timedelta(seconds=45) if call.started_at else now,
                     "transcript": transcript,
                     "summary": summary,
                 })
                 await self.repository.save(call)
         return call
+
+    async def end_call(self, user: AuthenticatedUser, call_id: str) -> dict[str, Any]:
+        call = await self.repository.get_for_user(user.user_id, call_id)
+        if call.status in ("COMPLETED", "FAILED", "NO_ANSWER", "CANCELLED"):
+            return call.model_dump(mode="json")
+        now = datetime.now(timezone.utc)
+        diff = (now - call.started_at).total_seconds() if call.started_at else 15
+        simulated_dialogue = [
+            (2, "Alex (AI Voice Assistant)", "Hello! This is Alex calling from T Rex CRM on behalf of the sales outreach team. Am I speaking with the business owner?"),
+            (8, "Lead", "Yes, hello! I can hear you clearly. What is this call regarding?"),
+            (15, "Alex (AI Voice Assistant)", "We noticed your company's interest in automating lead intelligence, omnichannel outreach, and voice follow-ups. We wanted to see if scheduling a quick product demo makes sense for your team."),
+            (24, "Lead", "That sounds great actually. We definitely need a way to follow up with new leads automatically without manual dialing."),
+            (32, "Alex (AI Voice Assistant)", "Excellent! I have scheduled our product specialist for a 15-minute demo tomorrow. You will receive the calendar invitation shortly."),
+            (38, "Lead", "Perfect, thank you!"),
+            (42, "Alex (AI Voice Assistant)", "Thank you so much, have a wonderful day ahead!"),
+        ]
+        active_turns = [f"{speaker}: {text}" for t, speaker, text in simulated_dialogue if t <= max(diff, 2)]
+        if not active_turns:
+            active_turns = [f"{simulated_dialogue[0][1]}: {simulated_dialogue[0][2]}"]
+        transcript = "\n".join(active_turns)
+        summary = "Call concluded by user. Lead expressed positive engagement."
+        call = call.model_copy(update={
+            "status": "COMPLETED",
+            "outcome": "INTERESTED" if len(active_turns) >= 2 else "FOLLOW_UP_REQUIRED",
+            "duration_seconds": max(int(diff), 5),
+            "ended_at": now,
+            "transcript": transcript,
+            "summary": summary,
+        })
+        await self.repository.save(call)
+        return call.model_dump(mode="json")
 
     async def list_calls(
         self,

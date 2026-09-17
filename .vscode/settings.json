@@ -1,0 +1,17 @@
+{
+  "python.defaultInterpreterPath": "C:\\Users\\hamza\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/backend",
+    "${workspaceFolder}/calling-engine/backend",
+    "${workspaceFolder}/tpi-engine/backend",
+    "${workspaceFolder}/scraper-engine/backend",
+    "${workspaceFolder}/sms-engine/backend"
+  ],
+  "python.autoComplete.extraPaths": [
+    "${workspaceFolder}/backend",
+    "${workspaceFolder}/calling-engine/backend",
+    "${workspaceFolder}/tpi-engine/backend",
+    "${workspaceFolder}/scraper-engine/backend",
+    "${workspaceFolder}/sms-engine/backend"
+  ]
+}

@@ -31,6 +31,15 @@ export const hubspotApi = {
   status: () => apiRequest<HubSpotStatus>("/api/v1/hubspot/status"),
   connect: () =>
     apiRequest<{ authorization_url: string; expires_in: number }>("/api/v1/hubspot/connect"),
+  connectToken: (token: string) =>
+    apiRequest<HubSpotStatus>("/api/v1/hubspot/connect-token", {
+      method: "POST",
+      body: JSON.stringify({ access_token: token }),
+    }),
+  disconnect: () =>
+    apiRequest<HubSpotStatus>("/api/v1/hubspot/disconnect", {
+      method: "POST",
+    }),
   contacts: (after?: string) =>
     apiRequest<ContactPage>(`/api/v1/hubspot/contacts${after ? `?after=${encodeURIComponent(after)}` : ""}`),
   importContacts: (hubspotContactIds: string[], selectAll: boolean) =>

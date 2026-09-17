@@ -39,6 +39,22 @@ class TPIHubSpotClient:
         )
         return self._validate(HubSpotConnectResponse, payload)
 
+    async def connect_token(self, user_id: UUID, access_token: str) -> HubSpotConnectionStatus:
+        payload = await self._request(
+            "POST",
+            "/api/v1/internal/hubspot/connect-token",
+            json={"user_id": str(user_id), "access_token": access_token},
+        )
+        return self._validate(HubSpotConnectionStatus, payload)
+
+    async def disconnect(self, user_id: UUID) -> HubSpotConnectionStatus:
+        payload = await self._request(
+            "POST",
+            "/api/v1/internal/hubspot/disconnect",
+            json={"user_id": str(user_id)},
+        )
+        return self._validate(HubSpotConnectionStatus, payload)
+
     async def status(self, user_id: UUID) -> HubSpotConnectionStatus:
         payload = await self._request(
             "GET", "/api/v1/internal/hubspot/status", params={"user_id": str(user_id)}
@@ -67,8 +83,15 @@ class TPIHubSpotClient:
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
             raise TPIHubSpotError("HubSpot integration is temporarily unavailable", 503) from exc
         if response.status_code >= 400:
-            status = 409 if response.status_code in {401, 404} else 503
-            raise TPIHubSpotError("HubSpot integration request failed", status)
+            err_msg = "HubSpot integration request failed"
+            try:
+                err_data = response.json()
+                if isinstance(err_data, dict):
+                    err_msg = err_data.get("detail") or err_data.get("error") or err_msg
+            except Exception:
+                pass
+            status = response.status_code if response.status_code in {400, 401, 403, 404, 409} else 503
+            raise TPIHubSpotError(err_msg, status)
         try:
             payload = response.json()
         except ValueError as exc:

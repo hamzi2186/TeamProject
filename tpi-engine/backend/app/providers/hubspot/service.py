@@ -105,6 +105,43 @@ class HubSpotService:
             expires_at=connection.expires_at,
         )
 
+    async def connect_token(self, user_id: UUID, access_token: str) -> ConnectionStatusResponse:
+        portal_id = await self._client.get_portal_id(access_token)
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(days=3650)
+        encrypted_token = self._cipher.encrypt(access_token)
+        record = await self._repository.upsert(
+            user_id=user_id,
+            portal_id=portal_id,
+            encrypted_access_token=encrypted_token,
+            encrypted_refresh_token=encrypted_token,
+            expires_at=expires_at,
+            scopes=["crm.objects.contacts.read", "crm.objects.contacts.write"],
+        )
+        return ConnectionStatusResponse(
+            status="connected",
+            connected=True,
+            portal_id=portal_id,
+            scopes=record.scopes,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            expires_at=record.expires_at,
+        )
+
+    async def disconnect(self, user_id: UUID) -> ConnectionStatusResponse:
+        record = await self._repository.latest_for_user(user_id)
+        if record:
+            await self._repository.set_status(record.id, "disconnected")
+        return ConnectionStatusResponse(
+            status="disconnected",
+            connected=False,
+            portal_id=None,
+            scopes=[],
+            created_at=None,
+            updated_at=None,
+            expires_at=None,
+        )
+
     async def contacts(
         self, user_id: UUID, *, after: str | None = None, limit: int = 100
     ) -> ContactPage:

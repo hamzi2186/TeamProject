@@ -35,6 +35,12 @@ export const callingApi = {
       { method: "POST", body: JSON.stringify(request) },
     ),
 
+  endCall: (callId: string) =>
+    apiFetch<{ success: boolean; data: Call; error: string | null }>(
+      `/api/v1/calling/calls/${callId}/end`,
+      { method: "POST" },
+    ),
+
   searchKB: (callId: string, query: string): Promise<{ success: boolean; data: { results: unknown[] } }> =>
     apiFetch(`/api/v1/calling/tools/search-client-kb`, {
       method: "POST",

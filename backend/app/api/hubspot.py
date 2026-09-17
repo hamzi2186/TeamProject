@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.api.dependencies import get_hubspot_import_service
 from app.auth.dependencies import AuthenticatedUser, get_current_user
@@ -25,6 +26,10 @@ def normalized_error(error: TPIHubSpotError) -> HTTPException:
     return HTTPException(error.status_code, str(error))
 
 
+class TokenConnectRequest(BaseModel):
+    access_token: str
+
+
 @router.get("/connect", response_model=HubSpotConnectResponse)
 async def connect(
     user: Annotated[AuthenticatedUser, Depends(get_current_user)],
@@ -32,6 +37,29 @@ async def connect(
 ) -> HubSpotConnectResponse:
     try:
         return await tpi.connect(user.user_id)
+    except TPIHubSpotError as exc:
+        raise normalized_error(exc) from exc
+
+
+@router.post("/connect-token", response_model=HubSpotConnectionStatus)
+async def connect_token(
+    payload: TokenConnectRequest,
+    user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    tpi: Annotated[TPIHubSpotClient, Depends(get_tpi_hubspot_client)],
+) -> HubSpotConnectionStatus:
+    try:
+        return await tpi.connect_token(user.user_id, payload.access_token)
+    except TPIHubSpotError as exc:
+        raise normalized_error(exc) from exc
+
+
+@router.post("/disconnect", response_model=HubSpotConnectionStatus)
+async def disconnect(
+    user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    tpi: Annotated[TPIHubSpotClient, Depends(get_tpi_hubspot_client)],
+) -> HubSpotConnectionStatus:
+    try:
+        return await tpi.disconnect(user.user_id)
     except TPIHubSpotError as exc:
         raise normalized_error(exc) from exc
 

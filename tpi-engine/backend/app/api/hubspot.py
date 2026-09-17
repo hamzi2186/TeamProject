@@ -1,8 +1,8 @@
 from typing import Annotated
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app.api.dependencies import require_service_token
@@ -17,6 +17,7 @@ from app.providers.hubspot.errors import (
 from app.providers.hubspot.schemas import (
     ConnectionStatusResponse,
     ConnectRequest,
+    TokenConnectRequest,
     ConnectResponse,
     ContactPageResponse,
 )
@@ -74,6 +75,28 @@ async def connect(
         raise provider_error(exc) from exc
 
 
+@internal_router.post("/connect-token", response_model=ConnectionStatusResponse)
+async def connect_token(
+    payload: TokenConnectRequest,
+    service: Annotated[HubSpotService, Depends(get_hubspot_service)],
+) -> ConnectionStatusResponse:
+    try:
+        return await service.connect_token(payload.user_id, payload.access_token)
+    except HubSpotError as exc:
+        raise provider_error(exc) from exc
+
+
+@internal_router.post("/disconnect", response_model=ConnectionStatusResponse)
+async def disconnect(
+    payload: ConnectRequest,
+    service: Annotated[HubSpotService, Depends(get_hubspot_service)],
+) -> ConnectionStatusResponse:
+    try:
+        return await service.disconnect(payload.user_id)
+    except HubSpotError as exc:
+        raise provider_error(exc) from exc
+
+
 @internal_router.get("/status", response_model=ConnectionStatusResponse)
 async def status(
     user_id: UUID,
@@ -100,6 +123,7 @@ async def contacts(
 
 
 async def callback(
+    request: Request,
     state: str,
     service: Annotated[HubSpotService, Depends(get_hubspot_service)],
     code: str | None = None,

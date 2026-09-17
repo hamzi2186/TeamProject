@@ -80,6 +80,15 @@ async def get_call(
     return _ok(await _get_service(db).get_call(current_user, call_id))
 
 
+@router.post("/calls/{call_id}/end")
+async def end_call(
+    call_id: str,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
+    db: Annotated[AsyncSession, Depends(get_db)] = ...,
+) -> dict[str, Any]:
+    return _ok(await _get_service(db).end_call(current_user, call_id))
+
+
 @router.post("/tools/search-client-kb")
 async def search_client_kb(
     request: KnowledgeSearchRequest,
