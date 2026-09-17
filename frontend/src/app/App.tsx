@@ -6,6 +6,7 @@ import { AppShell } from "./AppShell";
 import { HubSpotPage } from "../hubspot/HubSpotPage";
 import { LeadDetailPage } from "../leads/LeadDetailPage";
 import { LeadsPage } from "../leads/LeadsPage";
+import { AgentPage } from "../pages/Agent/AgentPage";
 import { CallDetailPage } from "../pages/Calling/CallDetailPage";
 import { CallingListPage } from "../pages/Calling/index";
 import { EngineHub } from "../pages/EngineHub";
@@ -33,6 +34,8 @@ export function App() {
       <Routes>
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<EngineHub />} />
+          <Route path="/agent" element={<AgentPage />} />
+          <Route path="/agent/:conversationId" element={<AgentPage />} />
           <Route path="/calling" element={<CallingListPage />} />
           <Route path="/calling/:callId" element={<CallDetailPage />} />
           <Route path="/hubspot" element={<HubSpotPage />} />

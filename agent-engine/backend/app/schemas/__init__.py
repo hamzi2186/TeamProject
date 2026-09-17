@@ -8,13 +8,30 @@ from app.schemas.agent import (
     IngestResultItem,
 )
 
+from app.schemas.conversations import (
+    ConversationAskResponse,
+    ConversationCreateRequest,
+    ConversationDetailResponse,
+    ConversationMessageCreateRequest,
+    ConversationSummaryResponse,
+    ConversationUpdateRequest,
+    MessageResponse,
+)
+
 __all__ = [
     "AgentDocumentSummary",
     "AgentSearchRequest",
     "AgentSearchResultItem",
     "AgentSearchResponse",
+    "ConversationAskResponse",
+    "ConversationCreateRequest",
+    "ConversationDetailResponse",
+    "ConversationMessageCreateRequest",
+    "ConversationSummaryResponse",
+    "ConversationUpdateRequest",
     "IngestRequest",
     "IngestResponse",
     "IngestResultItem",
+    "MessageResponse",
 ]
 

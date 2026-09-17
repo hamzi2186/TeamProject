@@ -56,11 +56,11 @@ const engines: EngineCardProps[] = [
   },
   {
     title: "Agent Engine",
-    description: "Autonomous research agent discovering lead context and company insights.",
-    path: "/calling",
+    description: "Conversational RAG assistant answering questions grounded in verified documentation.",
+    path: "/agent",
     icon: Bot,
     tone: "green",
-    statusText: "Available",
+    statusText: "Active",
     isExternalOrPending: false,
   },
 ];

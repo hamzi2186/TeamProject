@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     agent_assistant_top_k: int = 5
     agent_assistant_min_similarity: float = 0.5
     agent_assistant_context_max_chars: int = 8000
+    agent_assistant_history_max_messages: int = 10
+    agent_assistant_history_max_chars: int = 6000
 
     @field_validator("database_url")
     @classmethod

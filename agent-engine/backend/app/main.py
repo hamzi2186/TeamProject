@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.api.admin import router as admin_router
 from app.api.assistant import router as assistant_router
+from app.api.conversations import router as conversations_router
 from app.api.retrieval import router as retrieval_router
 from app.core.config import get_settings
 from app.db.session import engine
@@ -26,11 +27,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(admin_router)
 app.include_router(assistant_router)
+app.include_router(conversations_router)
 app.include_router(retrieval_router)
 
 

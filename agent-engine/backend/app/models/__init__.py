@@ -1,4 +1,4 @@
-from app.models.agent import AgentDocument, AgentKnowledgeChunk
+from app.models.agent import AgentConversation, AgentDocument, AgentKnowledgeChunk, AgentMessage
 
-__all__ = ["AgentDocument", "AgentKnowledgeChunk"]
+__all__ = ["AgentConversation", "AgentDocument", "AgentKnowledgeChunk", "AgentMessage"]
 
