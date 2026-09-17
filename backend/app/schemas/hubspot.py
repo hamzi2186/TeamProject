@@ -45,7 +45,15 @@ class HubSpotImportRequest(BaseModel):
         return self
 
 
+class HubSpotWebsiteIngestionFailure(BaseModel):
+    hubspot_contact_ids: list[str]
+    message: str
+
+
 class HubSpotImportResponse(BaseModel):
     imported: int
     created: int
     updated: int
+    website_ingestion_failures: list[HubSpotWebsiteIngestionFailure] = Field(
+        default_factory=list
+    )

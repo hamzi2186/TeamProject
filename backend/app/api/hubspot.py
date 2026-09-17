@@ -67,7 +67,7 @@ async def import_contacts(
     service: Annotated[HubSpotImportService, Depends(get_hubspot_import_service)],
 ) -> HubSpotImportResponse:
     try:
-        result = await service.run(user.user_id, payload)
+        result = await service.run(user.user_id, user.role, payload)
         return HubSpotImportResponse(**result.__dict__)
     except TPIHubSpotError as exc:
         raise normalized_error(exc) from exc

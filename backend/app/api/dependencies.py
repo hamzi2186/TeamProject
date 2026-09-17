@@ -19,6 +19,7 @@ def get_lead_repository(
 def get_hubspot_import_service(
     tpi: Annotated[TPIHubSpotClient, Depends(get_tpi_hubspot_client)],
     leads: Annotated[LeadRepository, Depends(get_lead_repository)],
+    scraper: Annotated[ScraperClient, Depends(get_scraper_client)],
 ) -> HubSpotImportService:
-    return HubSpotImportService(tpi, leads)
+    return HubSpotImportService(tpi, leads, scraper)
 

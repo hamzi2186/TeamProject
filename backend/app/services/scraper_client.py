@@ -23,6 +23,34 @@ class ScraperClient:
         token, _ = create_access_token(user_id, role)
         return {"Authorization": f"Bearer {token}"}
 
+    async def normalize_website(self, user_id: UUID, role: str, url: str) -> dict:
+        try:
+            response = await self._client.post(
+                f"{self._base_url}/api/v1/websites/normalize",
+                headers=self._auth_header(user_id, role),
+                json={"url": url},
+            )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise ScraperClientError("Scraper service is unreachable", status_code=503) from exc
+        if response.status_code >= 400:
+            error_detail = "Website URL could not be normalized"
+            try:
+                error_detail = response.json().get("detail", error_detail)
+            except Exception:
+                pass
+            raise ScraperClientError(error_detail, status_code=response.status_code)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ScraperClientError("Scraper service returned an invalid response") from exc
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get("normalized_url"), str)
+            or not isinstance(payload.get("normalized_key"), str)
+        ):
+            raise ScraperClientError("Scraper service returned an invalid response")
+        return payload
+
     async def get_website_status(self, user_id: UUID, role: str, website_id: UUID) -> dict | None:
         try:
             response = await self._client.get(
@@ -75,7 +103,13 @@ class ScraperClient:
             except Exception:
                 pass
             raise ScraperClientError(error_detail, status_code=response.status_code)
-        return response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ScraperClientError("Scraper service returned an invalid response") from exc
+        if not isinstance(payload, dict):
+            raise ScraperClientError("Scraper service returned an invalid response")
+        return payload
 
     async def refresh_website(self, user_id: UUID, role: str, website_id: UUID) -> dict:
         try:

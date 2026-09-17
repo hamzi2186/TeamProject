@@ -21,6 +21,9 @@ export function HubSpotPage() {
   const [result, setResult] = useState<ImportResult | null>(null);
   const callbackOutcome = searchParams.get("hubspot");
   const callbackReason = searchParams.get("reason");
+  const websiteIngestionFailureCount = new Set(
+    result?.website_ingestion_failures.flatMap((failure) => failure.hubspot_contact_ids) ?? [],
+  ).size;
   const callbackError = callbackReason === "configuration"
     ? "HubSpot could not complete authorization. Verify HUBSPOT_REDIRECT_URI exactly matches the redirect URI registered in HubSpot and that its callback host is browser-reachable."
     : callbackReason === "state"
@@ -80,6 +83,7 @@ export function HubSpotPage() {
         <>
           <div className="status-card"><div><span className="status-dot" /><strong>Connected</strong><p>Portal {status.portal_id} · Updated {status.updated_at ? new Date(status.updated_at).toLocaleString() : "just now"}</p></div><CheckCircle2 size={24} /></div>
           {result && <div className="notice success">Imported {result.imported}: {result.created} created, {result.updated} updated.</div>}
+          {websiteIngestionFailureCount > 0 && <div className="notice error" role="alert">Imported the leads, but could not start website ingestion for {websiteIngestionFailureCount} contact{websiteIngestionFailureCount === 1 ? "" : "s"}. Re-import them or use Build Knowledge Base to retry.</div>}
           <div className="table-card">
             <div className="table-toolbar"><label className="check-label"><input type="checkbox" checked={selectAll} onChange={(event) => { setSelectAll(event.target.checked); setSelected(new Set()); }} />Select all HubSpot contacts</label><button className="primary compact" disabled={working || (!selectAll && selected.size === 0)} onClick={importContacts}><Download size={16} />Import {selectAll ? "all" : `selected (${selected.size})`}</button></div>
             {contacts.length === 0 ? <div className="table-empty">No HubSpot contacts found.</div> : <div className="table-scroll"><table><thead><tr><th /><th>Lead</th><th>Phone</th><th>Email</th><th>Website</th><th>Readiness</th></tr></thead><tbody>{contacts.map((contact) => { const id = contact.provider_contact_id; return <tr key={id}><td><input type="checkbox" disabled={selectAll} checked={selected.has(id)} onChange={() => setSelected((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; })} /></td><td><strong>{[contact.firstname, contact.lastname].filter(Boolean).join(" ") || "Unnamed contact"}</strong></td><td>{contact.phone || "—"}</td><td>{contact.email || "—"}</td><td>{contact.website || "—"}</td><td><span className={readiness(contact) === "Ready" ? "pill ready" : "pill warning"}>{readiness(contact)}</span></td></tr>; })}</tbody></table></div>}

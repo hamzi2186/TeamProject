@@ -101,6 +101,19 @@ class LeadRepository:
             imported=len(contacts), created=created, updated=len(contacts) - created
         )
 
+    async def lead_ids_by_hubspot_contact(
+        self, user_id: UUID, contact_ids: list[str]
+    ) -> dict[str, UUID]:
+        if not contact_ids:
+            return {}
+        result = await self._db.execute(
+            select(Lead.hubspot_contact_id, Lead.id).where(
+                Lead.user_id == user_id,
+                Lead.hubspot_contact_id.in_(contact_ids),
+            )
+        )
+        return dict(result.all())
+
     async def list_for_user(self, user_id: UUID) -> list[Lead]:
         result = await self._db.scalars(
             select(Lead).where(Lead.user_id == user_id).order_by(Lead.updated_at.desc())

@@ -20,7 +20,12 @@ export type HubSpotContact = {
 };
 
 type ContactPage = { contacts: HubSpotContact[]; next_after: string | null };
-export type ImportResult = { imported: number; created: number; updated: number };
+export type ImportResult = {
+  imported: number;
+  created: number;
+  updated: number;
+  website_ingestion_failures: Array<{ hubspot_contact_ids: string[]; message: string }>;
+};
 
 export const hubspotApi = {
   status: () => apiRequest<HubSpotStatus>("/api/v1/hubspot/status"),
