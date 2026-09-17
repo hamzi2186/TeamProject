@@ -45,10 +45,10 @@ export function AppShell() {
             Mailer Engine
             <span className="badge-pill">Ready</span>
           </span>
-          <NavLink to="/agent">
+          <a href="/agent/">
             <Bot size={18} />
             Agent Engine
-          </NavLink>
+          </a>
         </nav>
         <button className="sidebar-logout" onClick={signOut}>
           <LogOut size={17} />

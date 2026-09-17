@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { agentApi } from "../../api/agent";
-import { ConversationList } from "../../features/agent/ConversationList";
-import { ChatView } from "../../features/agent/ChatView";
+import { agentApi } from "../api/agent";
+import { ConversationList } from "../features/agent/ConversationList";
+import { ChatView } from "../features/agent/ChatView";
 
 export function AgentPage() {
   const { conversationId } = useParams<{ conversationId?: string }>();
@@ -31,10 +31,10 @@ export function AgentPage() {
     enabled: !!conversationId,
   });
 
-  // Auto-select latest conversation if on /agent root and list has items
+  // Auto-select latest conversation if on root and list has items
   useEffect(() => {
     if (!conversationId && conversations.length > 0) {
-      navigate(`/agent/${conversations[0].id}`, { replace: true });
+      navigate(`/${conversations[0].id}`, { replace: true });
     }
   }, [conversationId, conversations, navigate]);
 
@@ -51,7 +51,7 @@ export function AgentPage() {
     mutationFn: (title?: string) => agentApi.createConversation(title),
     onSuccess: (newConv) => {
       queryClient.invalidateQueries({ queryKey: ["agent-conversations"] });
-      navigate(`/agent/${newConv.id}`);
+      navigate(`/${newConv.id}`);
       setErrorMessage(null);
     },
     onError: (err: any) => {
@@ -78,7 +78,7 @@ export function AgentPage() {
     onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ["agent-conversations"] });
       if (conversationId === deletedId) {
-        navigate("/agent");
+        navigate("/");
       }
     },
     onError: (err: any) => {
@@ -92,7 +92,7 @@ export function AgentPage() {
       if (!targetId) {
         const created = await agentApi.createConversation();
         targetId = created.id;
-        navigate(`/agent/${targetId}`);
+        navigate(`/${targetId}`);
       }
       return agentApi.postMessage(targetId, content);
     },
@@ -113,7 +113,7 @@ export function AgentPage() {
         activeId={conversationId ?? null}
         onSelect={(id) => {
           setErrorMessage(null);
-          navigate(`/agent/${id}`);
+          navigate(`/${id}`);
         }}
         onCreate={() => createMutation.mutate(undefined)}
         onRename={(id, title) => renameMutation.mutate({ id, title })}

@@ -57,7 +57,7 @@ const engines: EngineCardProps[] = [
   {
     title: "Agent Engine",
     description: "Conversational RAG assistant answering questions grounded in verified documentation.",
-    path: "/agent",
+    path: "/agent/",
     icon: Bot,
     tone: "green",
     statusText: "Active",
@@ -74,21 +74,37 @@ export function EngineHub() {
         <p>Choose an operational engine to launch workflows, manage leads, or view outreach analytics.</p>
       </header>
       <section className="engine-grid">
-        {engines.map(({ title, description, path, icon: Icon, tone, statusText }) => (
-          <Link className={`engine-card engine-card-${tone}`} to={path} key={title}>
-            <span className="engine-icon">
-              <Icon size={24} />
-            </span>
-            <div className="engine-card-body">
-              <div className="engine-card-title-row">
-                <strong>{title}</strong>
-                {statusText && <span className={`pill ${tone === "green" ? "ready" : "neutral"}`}>{statusText}</span>}
+        {engines.map(({ title, description, path, icon: Icon, tone, statusText }) => {
+          const content = (
+            <>
+              <span className="engine-icon">
+                <Icon size={24} />
+              </span>
+              <div className="engine-card-body">
+                <div className="engine-card-title-row">
+                  <strong>{title}</strong>
+                  {statusText && <span className={`pill ${tone === "green" ? "ready" : "neutral"}`}>{statusText}</span>}
+                </div>
+                <small>{description}</small>
               </div>
-              <small>{description}</small>
-            </div>
-            <ArrowRight className="engine-arrow" size={20} />
-          </Link>
-        ))}
+              <ArrowRight className="engine-arrow" size={20} />
+            </>
+          );
+
+          if (path.startsWith("/agent")) {
+            return (
+              <a className={`engine-card engine-card-${tone}`} href={path} key={title}>
+                {content}
+              </a>
+            );
+          }
+
+          return (
+            <Link className={`engine-card engine-card-${tone}`} to={path} key={title}>
+              {content}
+            </Link>
+          );
+        })}
       </section>
     </main>
   );

@@ -1,0 +1,16 @@
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+ARG VITE_AGENT_API_BASE_URL=http://localhost:8003
+ARG VITE_PLATFORM_FRONTEND_URL=http://localhost:5173
+ENV VITE_AGENT_API_BASE_URL=$VITE_AGENT_API_BASE_URL
+ENV VITE_PLATFORM_FRONTEND_URL=$VITE_PLATFORM_FRONTEND_URL
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html/agent
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80

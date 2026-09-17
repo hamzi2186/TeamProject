@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { Check, MessageSquare, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, MessageSquare, Pencil, Plus, Trash2, X } from "lucide-react";
 import { ConversationSummary } from "../../api/agent";
+
+const platformUrl = import.meta.env.VITE_PLATFORM_FRONTEND_URL ?? "http://localhost:5173";
 
 interface ConversationListProps {
   conversations: ConversationSummary[];
@@ -53,6 +55,12 @@ export function ConversationList({
 
   return (
     <aside className="agent-sidebar">
+      <div className="agent-sidebar-platform-link">
+        <a href={platformUrl} className="agent-back-link" title="Return to Platform Dashboard">
+          <ArrowLeft size={14} />
+          <span>T Rex Platform</span>
+        </a>
+      </div>
       <div className="agent-sidebar-header">
         <h3>Conversations</h3>
         <button

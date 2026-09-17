@@ -3,10 +3,10 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthGuard } from "../auth/AuthGuard";
 import { AuthPage } from "../auth/AuthPage";
 import { AppShell } from "./AppShell";
+import { useEffect } from "react";
 import { HubSpotPage } from "../hubspot/HubSpotPage";
 import { LeadDetailPage } from "../leads/LeadDetailPage";
 import { LeadsPage } from "../leads/LeadsPage";
-import { AgentPage } from "../pages/Agent/AgentPage";
 import { CallDetailPage } from "../pages/Calling/CallDetailPage";
 import { CallingListPage } from "../pages/Calling/index";
 import { EngineHub } from "../pages/EngineHub";
@@ -19,6 +19,13 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+function AgentLauncher() {
+  useEffect(() => {
+    window.location.href = "/agent/";
+  }, []);
+  return null;
+}
 
 function ProtectedLayout() {
   return (
@@ -34,8 +41,8 @@ export function App() {
       <Routes>
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<EngineHub />} />
-          <Route path="/agent" element={<AgentPage />} />
-          <Route path="/agent/:conversationId" element={<AgentPage />} />
+          <Route path="/agent/*" element={<AgentLauncher />} />
+          <Route path="/agent" element={<AgentLauncher />} />
           <Route path="/calling" element={<CallingListPage />} />
           <Route path="/calling/:callId" element={<CallDetailPage />} />
           <Route path="/hubspot" element={<HubSpotPage />} />
