@@ -233,6 +233,38 @@ def test_get_kb_status_when_ready(test_setup):
     assert data["last_indexed_at"] is not None
 
 
+def test_get_kb_status_when_partial(test_setup):
+    client, user, lead, repo, scraper = test_setup
+    site_id = uuid4()
+    kb_id = uuid4()
+    lead.website_id = site_id
+
+    scraper.websites[str(site_id)] = {
+        "website": {
+            "id": site_id,
+            "original_url": "https://example.com",
+            "normalized_url": "https://example.com",
+            "normalized_key": f"{user.user_id}:https://example.com",
+            "crawl_status": "PARTIAL",
+            "last_crawled_at": datetime.now(UTC).isoformat(),
+            "content_fingerprint": "hash123",
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
+            "knowledge_base_id": kb_id,
+            "kb_status": "PARTIAL",
+            "page_count": 5,
+            "chunk_count": 20,
+            "leads_using_kb": 1,
+        },
+        "job": {"status": "PARTIAL", "error_message": None},
+    }
+
+    res = client.get(f"/api/v1/leads/{lead.id}/knowledge-base")
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "PARTIAL"
+
+
 def test_refresh_knowledge_base(test_setup):
     client, user, lead, repo, scraper = test_setup
     site_id = uuid4()

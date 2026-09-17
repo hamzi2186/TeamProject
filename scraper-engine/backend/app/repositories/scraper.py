@@ -165,6 +165,24 @@ class ScraperRepository:
         )
         await self.db.commit()
 
+    async def mark_dispatch_failed(self, user_id: UUID, job_id: UUID) -> None:
+        await self.db.execute(
+            update(ScrapeJob)
+            .where(
+                ScrapeJob.id == job_id,
+                ScrapeJob.user_id == user_id,
+                ScrapeJob.status == "QUEUED",
+                ScrapeJob.celery_task_id.is_(None),
+            )
+            .values(
+                status="FAILED",
+                error_code="TASK_DISPATCH_FAILED",
+                error_message="Website ingestion could not be queued",
+                completed_at=func.now(),
+            )
+        )
+        await self.db.commit()
+
     async def list_websites(
         self, user_id: UUID, normalized_key: str | None = None
     ) -> list[WebsiteSummary]:
@@ -233,7 +251,7 @@ class ScraperRepository:
         await self.db.flush()
         self.db.add_all(chunks)
         status = "PARTIAL" if partial_reason else "READY"
-        kb.status = "READY"
+        kb.status = status
         kb.embedding_provider = provider
         kb.embedding_model = model
         kb.embedding_dimension = dimension

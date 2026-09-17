@@ -34,9 +34,12 @@ class FakeRepository:
             updated_at=datetime.now(UTC),
         )
         self.kb = SimpleNamespace(id=uuid4(), status="PENDING")
-        self.job = SimpleNamespace(id=uuid4())
+        self.job = SimpleNamespace(
+            id=uuid4(), status="QUEUED", celery_task_id=None, error_message=None
+        )
         self.user_ids = []
         self.task_ids = []
+        self.dispatch_failures = []
 
     async def create_site_kb_job(self, *, user_id, **_kwargs):
         self.user_ids.append(user_id)
@@ -44,6 +47,14 @@ class FakeRepository:
 
     async def set_task_id(self, job_id, task_id):
         self.task_ids.append((job_id, task_id))
+        self.job.celery_task_id = task_id
+
+    async def mark_dispatch_failed(self, user_id, job_id):
+        assert user_id == self.owner_id
+        assert job_id == self.job.id
+        self.job.status = "FAILED"
+        self.job.error_message = "Website ingestion could not be queued"
+        self.dispatch_failures.append(job_id)
 
     async def website_summary(self, user_id, _website_id):
         assert user_id == self.owner_id
@@ -97,3 +108,100 @@ def test_ingest_uses_authenticated_tenant_and_dispatches_job(monkeypatch):
     assert dispatcher.job_ids == [repository.job.id]
     assert response.json()["website"]["normalized_key"] == "example.com"
     app.dependency_overrides.clear()
+
+
+def test_active_job_is_reused_without_another_dispatch(monkeypatch):
+    import app.api.websites as websites_api
+
+    async def allow(_url):
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(websites_api, "validate_public_url", allow)
+    user = AuthenticatedUser(user_id=uuid4(), role="customer")
+    repository = FakeRepository(user.user_id)
+
+    async def reused_job(*, user_id, **_kwargs):
+        repository.user_ids.append(user_id)
+        return repository.website, repository.kb, repository.job, True
+
+    repository.create_site_kb_job = reused_job
+    dispatcher = FakeDispatcher()
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_repository] = lambda: repository
+    app.dependency_overrides[get_task_dispatcher] = lambda: dispatcher
+    try:
+        response = TestClient(app).post(
+            "/api/v1/websites/ingest",
+            json={"url": "https://example.com", "lead_ids": []},
+        )
+        assert response.status_code == 202
+        assert response.json()["reused"] is True
+        assert dispatcher.job_ids == []
+        assert repository.task_ids == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_dispatch_failure_closes_job_and_later_ingest_dispatches_fresh_job(monkeypatch):
+    import app.api.websites as websites_api
+
+    async def allow(_url):
+        return ["93.184.216.34"]
+
+    class FailOnceDispatcher(FakeDispatcher):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+
+        def dispatch(self, job_id):
+            self.attempts += 1
+            self.job_ids.append(job_id)
+            if self.attempts == 1:
+                raise RuntimeError("broker credentials and address must stay private")
+            return "task-retry"
+
+    class RetryRepository(FakeRepository):
+        def __init__(self, owner_id):
+            super().__init__(owner_id)
+            self.jobs = []
+
+        async def create_site_kb_job(self, *, user_id, **_kwargs):
+            self.user_ids.append(user_id)
+            self.job = SimpleNamespace(
+                id=uuid4(), status="QUEUED", celery_task_id=None, error_message=None
+            )
+            self.jobs.append(self.job)
+            return self.website, self.kb, self.job, False
+
+    monkeypatch.setattr(websites_api, "validate_public_url", allow)
+    user = AuthenticatedUser(user_id=uuid4(), role="customer")
+    repository = RetryRepository(user.user_id)
+    dispatcher = FailOnceDispatcher()
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_repository] = lambda: repository
+    app.dependency_overrides[get_task_dispatcher] = lambda: dispatcher
+    client = TestClient(app)
+    try:
+        first = client.post(
+            "/api/v1/websites/ingest",
+            json={"url": "https://example.com", "lead_ids": []},
+        )
+        assert first.status_code == 503
+        assert first.json() == {"detail": "Website ingestion could not be queued"}
+        failed_job = repository.jobs[0]
+        assert failed_job.status == "FAILED"
+        assert failed_job.celery_task_id is None
+        assert "credentials" not in first.text
+        assert "address" not in first.text
+
+        second = client.post(
+            "/api/v1/websites/ingest",
+            json={"url": "https://example.com", "lead_ids": []},
+        )
+        assert second.status_code == 202
+        fresh_job = repository.jobs[1]
+        assert fresh_job.id != failed_job.id
+        assert fresh_job.celery_task_id == "task-retry"
+        assert dispatcher.job_ids == [failed_job.id, fresh_job.id]
+    finally:
+        app.dependency_overrides.clear()

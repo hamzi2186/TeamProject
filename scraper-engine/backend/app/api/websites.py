@@ -53,6 +53,21 @@ async def validated_normalization(raw_url: str):
         raise HTTPException(422, str(exc)) from exc
 
 
+async def dispatch_job(
+    *,
+    repository: ScraperRepository,
+    dispatcher: TaskDispatcher,
+    user_id: UUID,
+    job_id: UUID,
+) -> None:
+    try:
+        task_id = dispatcher.dispatch(job_id)
+    except Exception as exc:
+        await repository.mark_dispatch_failed(user_id, job_id)
+        raise HTTPException(503, "Website ingestion could not be queued") from exc
+    await repository.set_task_id(job_id, task_id)
+
+
 @router.post("/websites/normalize", response_model=NormalizeResponse)
 async def normalize(
     payload: NormalizeRequest,
@@ -81,8 +96,12 @@ async def ingest(
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     if job is not None and not reused:
-        task_id = dispatcher.dispatch(job.id)
-        await repository.set_task_id(job.id, task_id)
+        await dispatch_job(
+            repository=repository,
+            dispatcher=dispatcher,
+            user_id=current.user_id,
+            job_id=job.id,
+        )
     summary = await repository.website_summary(current.user_id, website.id)
     return IngestResponse(
         website=website_response(summary),
@@ -173,8 +192,12 @@ async def refresh_website(
         website_id=website.id,
     )
     if job is not None and not reused:
-        task_id = dispatcher.dispatch(job.id)
-        await repository.set_task_id(job.id, task_id)
+        await dispatch_job(
+            repository=repository,
+            dispatcher=dispatcher,
+            user_id=current.user_id,
+            job_id=job.id,
+        )
     summary = await repository.website_summary(current.user_id, website.id)
     return IngestResponse(
         website=website_response(summary),
