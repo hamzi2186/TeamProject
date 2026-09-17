@@ -25,11 +25,12 @@ def _get_service(db: AsyncSession) -> CallingService:
 
 class StartCallRequest(BaseModel):
     lead_id: str
-    phone_number: str
+    phone_number: str = "+10000000000"
     purpose: str = "Follow up with lead"
     campaign_id: str | None = None
     prompt: str | None = None
     lead_variables: dict[str, Any] = Field(default_factory=dict)
+    is_mock: bool = False
 
 
 class KnowledgeSearchRequest(BaseModel):
@@ -68,6 +69,16 @@ async def start_call(
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
     db: Annotated[AsyncSession, Depends(get_db)] = ...,
 ) -> dict[str, Any]:
+    return _ok(await _get_service(db).start_outbound_call(current_user, request))
+
+
+@router.post("/calls/mock")
+async def start_mock_call(
+    request: StartCallRequest,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
+    db: Annotated[AsyncSession, Depends(get_db)] = ...,
+) -> dict[str, Any]:
+    request.is_mock = True
     return _ok(await _get_service(db).start_outbound_call(current_user, request))
 
 

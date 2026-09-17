@@ -36,32 +36,49 @@ class CallingService:
     async def start_outbound_call(
         self, user: AuthenticatedUser, request: Any
     ) -> dict[str, Any]:
-        if not request.phone_number.startswith("+"):
+        is_mock = bool(
+            getattr(request, "is_mock", False)
+            or getattr(request, "mock", False)
+            or getattr(request, "phone_number", "") in ("+0000000000", "+10000000000", "mock")
+        )
+        if not is_mock and not request.phone_number.startswith("+"):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Phone number must be E.164 format (e.g. +12125551234)",
             )
-        try:
-            provider_result = self.provider.start_call(
-                user=user,
-                lead_id=request.lead_id,
-                phone_number=request.phone_number,
-                purpose=request.purpose,
-                campaign_id=getattr(request, "campaign_id", None),
-                prompt=getattr(request, "prompt", None),
-                lead_variables=getattr(request, "lead_variables", None),
-            )
-        except TPIVoiceError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Voice provider unavailable: {exc}",
-            ) from exc
 
-        # TPI normalizes the response — extract provider_call_id
-        provider_call_id = (
-            provider_result.get("provider_call_id")
-            or provider_result.get("call", {}).get("id")
-        )
+        if is_mock:
+            provider_call_id = f"vapi-sim-{uuid4()}"
+            provider_result = {
+                "id": provider_call_id,
+                "status": "queued",
+                "phoneNumber": request.phone_number or "+10000000000",
+                "type": "outboundPhoneCall",
+                "simulated": True,
+                "is_mock": True,
+            }
+        else:
+            try:
+                provider_result = self.provider.start_call(
+                    user=user,
+                    lead_id=request.lead_id,
+                    phone_number=request.phone_number,
+                    purpose=request.purpose,
+                    campaign_id=getattr(request, "campaign_id", None),
+                    prompt=getattr(request, "prompt", None),
+                    lead_variables=getattr(request, "lead_variables", None),
+                )
+            except TPIVoiceError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Voice provider unavailable: {exc}",
+                ) from exc
+
+            # TPI normalizes the response — extract provider_call_id
+            provider_call_id = (
+                provider_result.get("provider_call_id")
+                or provider_result.get("call", {}).get("id")
+            )
 
         call = CallRecord(
             call_id=str(uuid4()),

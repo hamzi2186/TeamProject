@@ -14,6 +14,7 @@ export interface StartCallRequest {
   purpose?: string;
   campaign_id?: string;
   lead_variables?: Record<string, string>;
+  is_mock?: boolean;
 }
 
 export const callingApi = {
@@ -30,9 +31,15 @@ export const callingApi = {
     apiFetch<CallResponse>(`/api/v1/calling/calls/${callId}`),
 
   startCall: (request: StartCallRequest) =>
-    apiFetch<{ success: boolean; data: { call_id: string; provider_call_id: string | null; status: string }; error: string | null }>(
+    apiFetch<{ success: boolean; data: { call_id: string; provider_call_id: string | null; status: string; is_mock?: boolean }; error: string | null }>(
       "/api/v1/calling/calls",
       { method: "POST", body: JSON.stringify(request) },
+    ),
+
+  startMockCall: (request: StartCallRequest) =>
+    apiFetch<{ success: boolean; data: { call_id: string; provider_call_id: string | null; status: string; is_mock?: boolean }; error: string | null }>(
+      "/api/v1/calling/calls/mock",
+      { method: "POST", body: JSON.stringify({ ...request, is_mock: true }) },
     ),
 
   endCall: (callId: string) =>

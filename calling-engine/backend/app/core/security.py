@@ -58,33 +58,3 @@ async def get_current_user(
 
 
 CurrentUser = Depends(get_current_user)
-
-
-def generate_otp() -> str:
-    return f"{secrets.randbelow(1_000_000):06d}"
-
-
-def hash_secret(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def verify_secret(value: str, encoded: str) -> bool:
-    return secrets.compare_digest(hash_secret(value), encoded)
-
-
-def generate_refresh_token() -> str:
-    return secrets.token_urlsafe(48)
-
-
-def digest_token(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def create_access_token(user_id: UUID, role: str) -> tuple[str, int]:
-    settings = get_settings()
-    private_key, _ = ensure_jwt_keys()
-    now = datetime.now(UTC)
-    expires = now + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": str(user_id), "role": role, "type": "access", "iss": settings.auth_issuer, "aud": settings.auth_audience, "iat": now, "exp": expires, "jti": str(uuid4())}
-    import jwt as jwt_module
-    return jwt_module.encode(payload, private_key, algorithm=settings.auth_jwt_algorithm), int((expires - now).total_seconds())

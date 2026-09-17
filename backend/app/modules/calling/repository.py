@@ -54,7 +54,19 @@ class SQLCallRepository:
 
         call_uuid = _uuid.UUID(call.call_id)
         user_uuid = _uuid.UUID(call.user_id)
-        lead_uuid = _uuid.UUID(str(call.lead_id))
+        try:
+            lead_uuid = _uuid.UUID(str(call.lead_id))
+        except (ValueError, AttributeError):
+            lead_uuid = _uuid.uuid5(_uuid.NAMESPACE_DNS, str(call.lead_id))
+
+        from app.models.lead import Lead
+        from sqlalchemy import select
+        lead_row = await self.db.get(Lead, lead_uuid)
+        if lead_row is None:
+            first_lead_id = (await self.db.execute(select(Lead.id).limit(1))).scalars().first()
+            if first_lead_id:
+                lead_uuid = first_lead_id
+
         conv_uuid = _uuid.UUID(call.conversation_id) if call.conversation_id else None
 
         existing = await self.db.get(Call, call_uuid)

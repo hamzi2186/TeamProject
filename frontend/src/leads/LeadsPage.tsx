@@ -34,17 +34,20 @@ export function LeadsPage() {
     void load();
   }, [load]);
 
-  async function callLead(lead: Lead) {
-    if (!lead.phone) return;
+  async function callLead(lead: Lead, isMock: boolean = false) {
+    const phone = lead.phone || "+10000000000";
+    if (!lead.phone && !isMock) return;
     setCallingLeadId(lead.id);
     setError("");
     setSuccessNotice("");
 
     try {
-      const res = await callingApi.startCall({
+      const apiMethod = isMock ? callingApi.startMockCall : callingApi.startCall;
+      const res = await apiMethod({
         lead_id: lead.id,
-        phone_number: lead.phone,
+        phone_number: phone,
         purpose: "Follow up with lead",
+        is_mock: isMock,
         lead_variables: {
           name: lead.display_name || (`${lead.first_name || ""} ${lead.last_name || ""}`.trim() || "Lead"),
           email: lead.email || "",
@@ -55,11 +58,11 @@ export function LeadsPage() {
       setActiveCall({
         callId: res.data.call_id,
         leadName: leadDisplayName,
-        phoneNumber: lead.phone,
+        phoneNumber: phone,
         companyName: lead.website_url || undefined,
       });
 
-      setSuccessNotice(`Active AI voice call initiated with ${leadDisplayName}.`);
+      setSuccessNotice(isMock ? `Simulated Mock AI voice call started with ${leadDisplayName}.` : `Active AI voice call initiated with ${leadDisplayName}.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not start call.");
     } finally {
@@ -142,16 +145,27 @@ export function LeadsPage() {
                     <td>
                       <span className="pill ready">{lead.current_status}</span>
                     </td>
-                    <td>
-                      <button
-                        className="primary compact"
-                        disabled={!lead.phone || callingLeadId === lead.id}
-                        onClick={() => void callLead(lead)}
-                        title={lead.phone ? "Initiate AI voice call" : "Phone number required"}
-                      >
-                        <PhoneCall size={14} />
-                        {callingLeadId === lead.id ? "Calling…" : lead.phone ? "Call lead" : "No phone"}
-                      </button>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button
+                          className="primary compact"
+                          disabled={!lead.phone || callingLeadId === lead.id}
+                          onClick={() => void callLead(lead, false)}
+                          title={lead.phone ? "Initiate AI voice call" : "Phone number required"}
+                        >
+                          <PhoneCall size={14} />
+                          {callingLeadId === lead.id ? "Calling…" : lead.phone ? "Call lead" : "No phone"}
+                        </button>
+                        <button
+                          className="secondary compact"
+                          disabled={callingLeadId === lead.id}
+                          onClick={() => void callLead(lead, true)}
+                          title="Simulate interactive AI voice call (No credits required)"
+                          style={{ borderColor: "#10b981", color: "#10b981", padding: "6px 10px", fontSize: "0.8rem", fontWeight: 600 }}
+                        >
+                          Mock Call
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
