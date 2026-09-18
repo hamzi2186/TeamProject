@@ -35,11 +35,10 @@ export function AppShell() {
             HubSpot
           </NavLink>
           <div className="sidebar-section-divider">Other Engines</div>
-          <span className="sidebar-item disabled" title="Autonomous SMS campaign engine">
+          <a href="/sms/">
             <MessageSquare size={18} />
             SMS Engine
-            <span className="badge-pill">Ready</span>
-          </span>
+          </a>
           <span className="sidebar-item disabled" title="Cold outreach email mailer">
             <Mail size={18} />
             Mailer Engine

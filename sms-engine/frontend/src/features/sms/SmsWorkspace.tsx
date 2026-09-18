@@ -55,7 +55,10 @@ export function SmsWorkspace() {
       <a className="skip-link" href="#main">Skip to conversation</a>
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">T</div><div><strong>T Rex</strong><span>SMS Engine</span></div></div>
-        <nav aria-label="SMS navigation"><Link className="nav-item active" to="/sms"><MessageSquareText size={18} /> Conversations</Link></nav>
+        <nav aria-label="SMS navigation">
+          <a className="nav-item" href="/"><ArrowLeft size={18} /> T Rex Platform</a>
+          <Link className="nav-item active" to="/sms"><MessageSquareText size={18} /> Conversations</Link>
+        </nav>
         <div className="sidebar-status"><Signal size={16} /><div><strong>Engine online</strong><span>{smsTransport}</span></div></div>
       </aside>
       <div className="workspace">
