@@ -3,7 +3,15 @@ from ipaddress import ip_address
 from typing import Literal
 from urllib.parse import quote, unquote, urlsplit
 
-from pydantic import BaseModel, EmailStr, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    Field,
+    SecretStr,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,13 +59,17 @@ class Settings(BaseSettings):
     app_env: str = "development"
     frontend_url: str = "http://localhost:5173"
     tpi_internal_service_token: str
-    smtp_host: str
+    email_provider: Literal["smtp", "resend"] = "smtp"
+    smtp_host: str | None = None
     smtp_port: int = 587
-    smtp_username: str
-    smtp_password: str
-    smtp_from_email: EmailStr
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from_email: EmailStr | None = None
     smtp_from_name: str = "T Rex"
     smtp_use_tls: bool = True
+    resend_api_key: SecretStr | None = None
+    resend_from_email: EmailStr | None = None
+    resend_from_name: str = "T Rex"
     database_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
 
@@ -108,9 +120,6 @@ class Settings(BaseSettings):
 
     @field_validator(
         "tpi_internal_service_token",
-        "smtp_host",
-        "smtp_username",
-        "smtp_password",
         "hubspot_client_id",
         "hubspot_client_secret",
         "hubspot_redirect_uri",
@@ -121,6 +130,50 @@ class Settings(BaseSettings):
         if not value.strip():
             raise ValueError("Required TPI configuration is empty")
         return value
+
+    @model_validator(mode="after")
+    def email_provider_configuration_is_complete(self) -> "Settings":
+        if self.email_provider == "smtp":
+            required = {
+                "SMTP_HOST": self.smtp_host,
+                "SMTP_USERNAME": self.smtp_username,
+                "SMTP_PASSWORD": self.smtp_password,
+                "SMTP_FROM_EMAIL": self.smtp_from_email,
+            }
+        else:
+            required = {
+                "RESEND_API_KEY": self.resend_api_key,
+                "RESEND_FROM_EMAIL": self.resend_from_email,
+            }
+        missing = [
+            name
+            for name, value in required.items()
+            if not (
+                value.get_secret_value().strip()
+                if isinstance(value, SecretStr)
+                else str(value or "").strip()
+            )
+        ]
+        if missing:
+            raise ValueError(
+                f"EMAIL_PROVIDER={self.email_provider} requires: {', '.join(missing)}"
+            )
+        return self
+
+    @field_validator(
+        "smtp_host",
+        "smtp_username",
+        "smtp_password",
+        "smtp_from_email",
+        "resend_api_key",
+        "resend_from_email",
+        mode="before",
+    )
+    @classmethod
+    def blank_provider_setting_is_unset(cls, value: object) -> object:
+        if isinstance(value, SecretStr):
+            return None if not value.get_secret_value().strip() else value
+        return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("hubspot_redirect_uri")
     @classmethod

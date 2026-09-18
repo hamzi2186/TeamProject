@@ -2,7 +2,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from app.api.dependencies import require_service_token
 from app.contracts.email import EmailDeliveryRequest, EmailDeliveryResponse
-from app.providers.smtp.adapter import SmtpDeliveryError, send_email
+from app.services.email_delivery import EmailDeliveryError, send_email
 
 router = APIRouter(prefix="/api/v1/internal/email-delivery", tags=["internal-email"])
 
@@ -13,7 +13,7 @@ async def deliver(
 ) -> EmailDeliveryResponse:
     require_service_token(x_tpi_service_token)
     try:
-        await send_email(str(payload.to), payload.template, payload.variables)
-    except SmtpDeliveryError as exc:
+        provider = await send_email(str(payload.to), payload.template, payload.variables)
+    except EmailDeliveryError as exc:
         raise HTTPException(502, "Email provider delivery failed") from exc
-    return EmailDeliveryResponse(accepted=True)
+    return EmailDeliveryResponse(accepted=True, transport=provider)
