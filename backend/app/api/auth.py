@@ -202,8 +202,11 @@ async def forgot_password(
     payload: EmailRequest, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> dict:
     user = await db.scalar(select(AppUser).where(AppUser.email == normalize_email(payload.email)))
-    if user and user.email_verified_at:
-        await issue_otp(db, user, "reset_password")
+    if user:
+        try:
+            await issue_otp(db, user, "reset_password")
+        except EmailDeliveryError:
+            pass
     return {"message": "If the account exists, a reset code has been sent"}
 
 

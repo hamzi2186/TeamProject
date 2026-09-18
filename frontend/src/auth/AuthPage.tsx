@@ -11,8 +11,14 @@ export function AuthPage({ mode = "login" }: { mode?: "login" | "register" | "ve
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(() => {
+    if (mode === "verify" && searchParams.get("delivery") === "sent") {
+      return "A 6-digit verification code has been sent to your email. Please check your inbox or spam folder.";
+    }
     if (mode === "verify" && searchParams.get("delivery") === "failed") {
       return "Your account was created, but the verification email could not be delivered. Try resending it.";
+    }
+    if (mode === "reset") {
+      return "If your account exists, a 6-digit password reset code has been sent to your email.";
     }
     if (mode === "login" && searchParams.get("verified") === "1") {
       return "Email verified successfully! You can now sign in.";
@@ -210,7 +216,36 @@ export function AuthPage({ mode = "login" }: { mode?: "login" | "register" | "ve
             )}
 
             {notice && <div className="notice" role="status">{notice}</div>}
-            {error && <div className="notice error" role="alert">{error}</div>}
+            {error && (
+              <div className="notice error" role="alert">
+                <div>{error}</div>
+                {isLogin && (
+                  <div style={{ marginTop: "8px", fontSize: "0.85rem", borderTop: "1px solid rgba(239, 68, 68, 0.3)", paddingTop: "6px" }}>
+                    {error.toLowerCase().includes("verify") ? (
+                      <span>
+                        Need to verify?{" "}
+                        <Link
+                          to={`/auth/verify-email${email ? `?email=${encodeURIComponent(email)}` : ""}`}
+                          style={{ color: "#93c5fd", fontWeight: 600, textDecoration: "underline" }}
+                        >
+                          Verify your email &rarr;
+                        </Link>
+                      </span>
+                    ) : (
+                      <span>
+                        Forgot your password?{" "}
+                        <Link
+                          to={`/auth/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}
+                          style={{ color: "#93c5fd", fontWeight: 600, textDecoration: "underline" }}
+                        >
+                          Reset your password here &rarr;
+                        </Link>
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <button className="primary" disabled={loading}>
               {loading

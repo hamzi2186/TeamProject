@@ -55,10 +55,20 @@ async def issue_otp(db: AsyncSession, user: AppUser, purpose: str) -> None:
     )
     db.add(otp)
     await db.commit()
+    print(f"\n==================================================", flush=True)
+    print(f"[*] [AUTH OTP CODE] To: {user.email}", flush=True)
+    print(f"[*] 6-Digit OTP Code: {code}", flush=True)
+    print(f"[*] Purpose: {purpose}", flush=True)
+    print(f"==================================================\n", flush=True)
     template = "verify_email" if purpose == "verify_email" else "reset_password"
     try:
         await send_auth_email(to=user.email, template=template, code=code)
     except EmailDeliveryError:
-        otp.used_at = datetime.now(UTC)
-        await db.commit()
-        raise
+        app_env = getattr(settings, "app_env", "production")
+        if app_env == "production":
+            otp.used_at = datetime.now(UTC)
+            await db.commit()
+            raise
+        import logging
+        logging.getLogger("auth").warning("Email delivery failed in %s for %s. OTP Code: %s", app_env, user.email, code)
+
