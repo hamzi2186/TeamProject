@@ -48,11 +48,11 @@ def _ok(data: Any) -> dict[str, Any]:
 
 @router.get("/calls")
 async def list_calls(
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     status_filter: str | None = Query(default=None, alias="status"),
     outcome: str | None = None,
     lead_id: str | None = None,
-    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
-    db: Annotated[AsyncSession, Depends(get_db)] = ...,
 ) -> dict[str, Any]:
     data = await _get_service(db).list_calls(
         current_user,
@@ -66,8 +66,8 @@ async def list_calls(
 @router.post("/calls")
 async def start_call(
     request: StartCallRequest,
-    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
-    db: Annotated[AsyncSession, Depends(get_db)] = ...,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, Any]:
     return _ok(await _get_service(db).start_outbound_call(current_user, request))
 
@@ -75,8 +75,8 @@ async def start_call(
 @router.post("/calls/mock")
 async def start_mock_call(
     request: StartCallRequest,
-    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
-    db: Annotated[AsyncSession, Depends(get_db)] = ...,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, Any]:
     request.is_mock = True
     return _ok(await _get_service(db).start_outbound_call(current_user, request))
@@ -85,8 +85,8 @@ async def start_mock_call(
 @router.get("/calls/{call_id}")
 async def get_call(
     call_id: str,
-    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
-    db: Annotated[AsyncSession, Depends(get_db)] = ...,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, Any]:
     return _ok(await _get_service(db).get_call(current_user, call_id))
 
@@ -94,8 +94,8 @@ async def get_call(
 @router.post("/calls/{call_id}/end")
 async def end_call(
     call_id: str,
-    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
-    db: Annotated[AsyncSession, Depends(get_db)] = ...,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, Any]:
     return _ok(await _get_service(db).end_call(current_user, call_id))
 
@@ -103,8 +103,8 @@ async def end_call(
 @router.post("/tools/search-client-kb")
 async def search_client_kb(
     request: KnowledgeSearchRequest,
-    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
-    db: Annotated[AsyncSession, Depends(get_db)] = ...,
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, Any]:
     """Mock KB tool contract for voice assistant (PRD §17.3 / Task §6)."""
     return _ok({
@@ -122,9 +122,9 @@ async def search_client_kb(
 @webhook_router.post("/vapi/events")
 async def vapi_webhook(
     payload: dict[str, Any],
+    db: Annotated[AsyncSession, Depends(get_db)],
     x_vapi_event_id: str | None = Header(default=None),
     x_tpi_event_id: str | None = Header(default=None),
-    db: Annotated[AsyncSession, Depends(get_db)] = ...,
 ) -> dict[str, Any]:
     """
     Receives normalized Vapi events forwarded by TPI (PRD §17.5).
