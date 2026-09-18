@@ -83,7 +83,11 @@ export function EngineHub() {
               <div className="engine-card-body">
                 <div className="engine-card-title-row">
                   <strong>{title}</strong>
-                  {statusText && <span className={`pill ${tone === "green" ? "ready" : "neutral"}`}>{statusText}</span>}
+                  {statusText && (
+                    <span className={`pill ${statusText === "Active" ? "ready" : "neutral"}`}>
+                      {statusText}
+                    </span>
+                  )}
                 </div>
                 <small>{description}</small>
               </div>
