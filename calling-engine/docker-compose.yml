@@ -10,7 +10,7 @@ services:
       APP_ENV: development
       FRONTEND_URL: http://localhost:5174
       DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:///./calling-engine.db}
-      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://localhost:8001}
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       TPI_INTERNAL_SERVICE_TOKEN: ${TPI_INTERNAL_SERVICE_TOKEN:-}
       CALLING_INTERNAL_WEBHOOK_URL: http://calling-backend:8002/api/v1/webhooks/vapi/events
     volumes:

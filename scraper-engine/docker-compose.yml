@@ -10,6 +10,7 @@ services:
     env_file: ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379/0
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
     ports:
       - "8002:8002"
     depends_on:
@@ -20,6 +21,7 @@ services:
     env_file: ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379/0
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       CRAWL_MAX_PAGES: ${CRAWL_MAX_PAGES:-100}
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "scraper.crawling,scraper.embeddings"]
     depends_on:

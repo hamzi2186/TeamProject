@@ -59,7 +59,7 @@ services:
       REDIS_URL: redis://redis:6379/1
       AUTH_JWKS_URL: http://host.docker.internal:8000/.well-known/jwks.json
       ALLOW_DEMO_IDENTITY: "true"
-      TPI_API_BASE_URL: http://tpi:8001
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       TPI_INTERNAL_SERVICE_TOKEN: ${TPI_INTERNAL_SERVICE_TOKEN:-local-tpi-token}
       SMS_INTERNAL_SERVICE_TOKEN: ${SMS_INTERNAL_SERVICE_TOKEN:-local-sms-token}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
@@ -76,6 +76,7 @@ services:
         condition: service_healthy
       tpi:
         condition: service_started
+        required: false
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/db')"]
       interval: 10s

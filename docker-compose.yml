@@ -38,7 +38,7 @@ services:
     environment:
       PYTHONPATH: /app
       REDIS_URL: redis://redis:6379/0
-      TPI_API_BASE_URL: http://tpi:8001
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       SCRAPER_API_BASE_URL: http://scraper-backend:8002
       AUTH_JWT_PRIVATE_KEY_PATH: /app/.secrets/auth_private.pem
       AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
@@ -53,6 +53,7 @@ services:
         condition: service_healthy
       tpi:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/db')"]
       interval: 10s
@@ -66,7 +67,7 @@ services:
       - ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379/0
-      TPI_API_BASE_URL: http://tpi:8001
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       AUTH_JWT_PRIVATE_KEY_PATH: /app/.secrets/auth_private.pem
       AUTH_JWT_PUBLIC_KEY_PATH: /app/.secrets/auth_public.pem
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "platform.default,platform.auth_email,calling.calls"]
@@ -75,6 +76,9 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      tpi:
+        condition: service_healthy
+        required: false
       backend:
         condition: service_healthy
 
@@ -101,7 +105,7 @@ services:
       - ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379/0
-      TPI_API_BASE_URL: http://tpi:8001
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
       FRONTEND_ORIGINS: http://localhost:5174,http://localhost:5173
       SCRAPER_INTERNAL_SERVICE_TOKEN: ${SCRAPER_INTERNAL_SERVICE_TOKEN:-local-scraper-service-token}
@@ -112,6 +116,7 @@ services:
         condition: service_healthy
       tpi:
         condition: service_healthy
+        required: false
       backend:
         condition: service_healthy
     healthcheck:
@@ -126,7 +131,7 @@ services:
       - ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379/0
-      TPI_API_BASE_URL: http://tpi:8001
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
       SCRAPER_INTERNAL_SERVICE_TOKEN: ${SCRAPER_INTERNAL_SERVICE_TOKEN:-local-scraper-service-token}
       IS_CELERY_WORKER: "true"
@@ -137,6 +142,7 @@ services:
         condition: service_healthy
       tpi:
         condition: service_healthy
+        required: false
       scraper-backend:
         condition: service_healthy
 
@@ -158,7 +164,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      TPI_API_BASE_URL: http://tpi:8001
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
       FRONTEND_ORIGINS: http://localhost:5174,http://localhost:5173,http://localhost:5177
       DOCS_ROOT_PATH: /app/docs/agent-knowledge
@@ -169,6 +175,7 @@ services:
     depends_on:
       tpi:
         condition: service_healthy
+        required: false
       backend:
         condition: service_healthy
     healthcheck:
@@ -213,7 +220,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${SMS_DB_USER:-sms}:${SMS_DB_PASSWORD:-sms}@sms-db:5432/${SMS_DB_NAME:-trex_sms}
       REDIS_URL: redis://redis:6379/1
-      TPI_API_BASE_URL: http://tpi:8001
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
       FRONTEND_URL: http://localhost:5175
       SMS_ENGINE_INTERNAL_BASE_URL: http://sms-backend:8004
@@ -225,6 +232,7 @@ services:
         condition: service_healthy
       tpi:
         condition: service_healthy
+        required: false
       backend:
         condition: service_healthy
       sms-db:
@@ -242,7 +250,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${SMS_DB_USER:-sms}:${SMS_DB_PASSWORD:-sms}@sms-db:5432/${SMS_DB_NAME:-trex_sms}
       REDIS_URL: redis://redis:6379/1
-      TPI_API_BASE_URL: http://tpi:8001
+      TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
       SMS_ENGINE_INTERNAL_BASE_URL: http://sms-backend:8004
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "sms.conversations"]
@@ -251,6 +259,7 @@ services:
         condition: service_healthy
       tpi:
         condition: service_healthy
+        required: false
       sms-backend:
         condition: service_healthy
 
