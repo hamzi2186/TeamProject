@@ -21,6 +21,15 @@ const engines: EngineCardProps[] = [
     statusText: "Active",
   },
   {
+    title: "SMS Engine",
+    description: "Autonomous 2-way SMS conversations and outreach campaigns via Twilio/TPI.",
+    path: "/sms/",
+    icon: MessageSquare,
+    tone: "purple",
+    statusText: "Available",
+    isExternalOrPending: false,
+  },
+  {
     title: "Leads Workspace",
     description: "Canonical leads database. Review imported contacts and trigger outbound calls directly.",
     path: "/leads",
@@ -35,15 +44,6 @@ const engines: EngineCardProps[] = [
     icon: DatabaseZap,
     tone: "orange",
     statusText: "Active",
-  },
-  {
-    title: "SMS Engine",
-    description: "Autonomous 2-way SMS conversations and outreach campaigns via Twilio/TPI.",
-    path: "/sms/",
-    icon: MessageSquare,
-    tone: "purple",
-    statusText: "Available",
-    isExternalOrPending: false,
   },
   {
     title: "Mailer Engine",
