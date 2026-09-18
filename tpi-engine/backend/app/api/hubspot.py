@@ -123,7 +123,6 @@ async def contacts(
 
 
 async def callback(
-    request: Request,
     state: str,
     service: Annotated[HubSpotService, Depends(get_hubspot_service)],
     code: str | None = None,

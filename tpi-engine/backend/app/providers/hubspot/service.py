@@ -131,7 +131,7 @@ class HubSpotService:
     async def disconnect(self, user_id: UUID) -> ConnectionStatusResponse:
         record = await self._repository.latest_for_user(user_id)
         if record:
-            await self._repository.set_status(record.id, "disconnected")
+            await self._repository.set_status(record.id, user_id=user_id, status="disconnected")
         return ConnectionStatusResponse(
             status="disconnected",
             connected=False,

@@ -153,16 +153,14 @@ class SqlAlchemyConnectionRepository:
             return await self._get_by_id(session, connection_id, user_id=user_id)
 
     async def set_status(
-        self, connection_id: uuid.UUID, *, user_id: uuid.UUID, status: str
+        self, connection_id: uuid.UUID, *, user_id: uuid.UUID | None = None, status: str
     ) -> None:
         async with self._factory() as session:
+            stmt = update(HubSpotConnectionRecord).where(HubSpotConnectionRecord.id == connection_id)
+            if user_id is not None:
+                stmt = stmt.where(HubSpotConnectionRecord.user_id == user_id)
             await session.execute(
-                update(HubSpotConnectionRecord)
-                .where(
-                    HubSpotConnectionRecord.id == connection_id,
-                    HubSpotConnectionRecord.user_id == user_id,
-                )
-                .values(status=status, updated_at=datetime.now(UTC))
+                stmt.values(status=status, updated_at=datetime.now(UTC))
             )
             await session.commit()
 
