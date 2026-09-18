@@ -39,7 +39,7 @@ const engines: EngineCardProps[] = [
   {
     title: "SMS Engine",
     description: "Autonomous 2-way SMS conversations and outreach campaigns via Twilio/TPI.",
-    path: "/calling",
+    path: "/sms/",
     icon: MessageSquare,
     tone: "purple",
     statusText: "Available",
@@ -91,7 +91,7 @@ export function EngineHub() {
             </>
           );
 
-          if (path.startsWith("/agent")) {
+          if (path.startsWith("/agent") || path.startsWith("/sms")) {
             return (
               <a className={`engine-card engine-card-${tone}`} href={path} key={title}>
                 {content}

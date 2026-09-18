@@ -116,7 +116,15 @@ def create_access_token(user_id: UUID, role: str) -> tuple[str, int]:
     expires = now + timedelta(minutes=settings.access_token_expire_minutes)
     payload = {"sub": str(user_id), "role": role, "type": "access", "iss": settings.auth_issuer, "aud": settings.auth_audience, "iat": now, "exp": expires, "jti": str(uuid4())}
     import jwt as jwt_module
-    return jwt_module.encode(payload, private_key, algorithm=settings.auth_jwt_algorithm), int((expires - now).total_seconds())
+    return (
+        jwt_module.encode(
+            payload,
+            private_key,
+            algorithm=settings.auth_jwt_algorithm,
+            headers={"kid": "trex-auth-1"},
+        ),
+        int((expires - now).total_seconds()),
+    )
 
 
 def public_jwk() -> dict:
@@ -139,4 +147,3 @@ def public_jwk() -> dict:
         "n": encode_int(numbers.n),
         "e": encode_int(numbers.e),
     }
-
