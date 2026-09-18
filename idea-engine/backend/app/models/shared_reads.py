@@ -83,6 +83,7 @@ class CallRead(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True)
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(GUID)
+    campaign_id: Mapped[uuid.UUID | None] = mapped_column(GUID)
     user_id: Mapped[uuid.UUID] = mapped_column(GUID, nullable=False)
     lead_id: Mapped[uuid.UUID] = mapped_column(GUID, nullable=False)
     direction: Mapped[str] = mapped_column(Text, default="OUTBOUND")

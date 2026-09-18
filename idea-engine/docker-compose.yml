@@ -1,54 +1,90 @@
-version: "3.8"
-
 services:
+  # Redis used by the Celery worker (daily scheduled report runs). Internal only.
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   idea-backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: trex-idea-backend
     restart: unless-stopped
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8006"]
     ports:
       - "${BACKEND_PORT:-8006}:8006"
     environment:
       - APP_ENV=${APP_ENV:-development}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/postgres}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - TPI_API_BASE_URL=${TPI_API_BASE_URL:-http://tpi:8001}
-      - REPORTS_STORAGE_DIR=/app/storage/reports
-      - REPORT_RUN_CRON=${REPORT_RUN_CRON:-59 23 * * *}
-      - FRONTEND_ORIGINS=${FRONTEND_ORIGINS:-http://localhost:5176,http://localhost:5173}
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is required. Copy .env.example to .env and fill in the shared Supabase connection string.}
+      - REDIS_URL=redis://redis:6379/0
+      - TPI_API_BASE_URL=${TPI_API_BASE_URL:-}
+      - TPI_INTERNAL_SERVICE_TOKEN=${TPI_INTERNAL_SERVICE_TOKEN:-}
+      - REPORTS_STORAGE_DIR=${REPORTS_STORAGE_DIR:-/app/storage/reports}
+      - REPORT_RUN_CRON=${REPORT_RUN_CRON:-0 0 * * *}
+      - FRONTEND_ORIGINS=${FRONTEND_ORIGINS:-http://localhost:5176,http://localhost:5173,http://localhost:5174,http://localhost:5175}
     volumes:
       - reports_data:/app/storage/reports
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
+  # Daily 00:00 UTC scheduler. Opt-in via the "scheduler" profile so teammates
+  # don't race the same shared report row: `docker compose --profile scheduler up -d`.
   idea-worker:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: trex-idea-worker
     restart: unless-stopped
+    profiles: ["scheduler"]
     command: ["celery", "-A", "app.workers.celery_app", "worker", "-B", "-l", "info"]
     environment:
       - APP_ENV=${APP_ENV:-development}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/postgres}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - TPI_API_BASE_URL=${TPI_API_BASE_URL:-http://tpi:8001}
-      - REPORTS_STORAGE_DIR=/app/storage/reports
-      - REPORT_RUN_CRON=${REPORT_RUN_CRON:-59 23 * * *}
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is required. Copy .env.example to .env and fill in the shared Supabase connection string.}
+      - REDIS_URL=redis://redis:6379/0
+      - TPI_API_BASE_URL=${TPI_API_BASE_URL:-}
+      - TPI_INTERNAL_SERVICE_TOKEN=${TPI_INTERNAL_SERVICE_TOKEN:-}
+      - REPORTS_STORAGE_DIR=${REPORTS_STORAGE_DIR:-/app/storage/reports}
+      - REPORT_RUN_CRON=${REPORT_RUN_CRON:-0 0 * * *}
     volumes:
       - reports_data:/app/storage/reports
+    depends_on:
+      redis:
+        condition: service_healthy
+      idea-backend:
+        condition: service_healthy
 
   idea-frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=http://localhost:8006
+        - VITE_API_BASE_URL=/
     container_name: trex-idea-frontend
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-5176}:80"
     depends_on:
-      - idea-backend
+      idea-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
 
 volumes:
   reports_data:

@@ -1,7 +1,7 @@
-import { apiClient } from "./client";
-import { IdeaReportRun, LeadJourneySummary } from "../types/reports";
+import { apiClient } from "@/api/client";
+import type { IdeaReportRun, LeadJourneySummary } from "@/types/reports";
 
-export async function fetchDailyReports(page = 1, pageSize = 20): Promise<IdeaReportRun[]> {
+export async function fetchDailyReports(page = 1, pageSize = 30): Promise<IdeaReportRun[]> {
   return apiClient<IdeaReportRun[]>(`/idea/reports/daily?page=${page}&page_size=${pageSize}`);
 }
 

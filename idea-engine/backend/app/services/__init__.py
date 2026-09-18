@@ -1,4 +1,8 @@
-from app.services.aggregator import fetch_lead_events, get_active_leads_for_date
+from app.services.aggregator import (
+    fetch_lead_campaign_names,
+    fetch_lead_events,
+    get_all_leads,
+)
 from app.services.docx_generator import build_daily_docx_report
 from app.services.outcome_evaluator import evaluate_lead_outcome
 from app.services.report_service import (
@@ -13,8 +17,9 @@ from app.services.summarizer import (
 )
 
 __all__ = [
+    "fetch_lead_campaign_names",
     "fetch_lead_events",
-    "get_active_leads_for_date",
+    "get_all_leads",
     "build_daily_docx_report",
     "evaluate_lead_outcome",
     "generate_daily_report",

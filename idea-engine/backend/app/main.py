@@ -9,6 +9,7 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.logging import logger, setup_logging
 from app.db.session import Base, engine
+from app.models.idea_reports import IdeaLeadReportItem, IdeaReportRun
 from app.schemas.common import APIResponse
 
 settings = get_settings()
@@ -21,11 +22,18 @@ async def lifespan(app: FastAPI):
     # Ensure reports directory exists
     os.makedirs(settings.reports_storage_dir, exist_ok=True)
 
-    # Initialize tables on startup
+    # Initialize only Idea Engine's own tables. The shared platform tables
+    # (leads, calls, sms_messages, emails, campaigns, conversations, ...) are
+    # owned and migrated by the root backend; we must never materialize them.
     try:
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            logger.info("Database tables initialized successfully.")
+            await conn.run_sync(
+                lambda sync_conn: Base.metadata.create_all(
+                    bind=sync_conn,
+                    tables=[IdeaReportRun.__table__, IdeaLeadReportItem.__table__],
+                )
+            )
+            logger.info("Idea Engine tables initialized successfully.")
     except Exception as exc:
         logger.warning(f"Could not initialize database tables: {exc}")
 

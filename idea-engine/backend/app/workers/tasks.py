@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.core.logging import logger
 from app.db.session import async_session_factory
@@ -11,12 +11,14 @@ from app.workers.celery_app import celery_app
 def generate_daily_report_task(target_date_str: str | None = None) -> dict:
     """
     Celery task that executes daily report generation.
-    Can be scheduled automatically or triggered asynchronously on demand.
+
+    Scheduled to fire at exactly 00:00 UTC. When no explicit date is provided
+    the previous calendar day (the day that just ended) is reported on.
     """
     if target_date_str:
         target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
     else:
-        target_date = datetime.now(timezone.utc).date()
+        target_date = (datetime.now(timezone.utc) - timedelta(days=1)).date()
 
     logger.info(f"Starting background daily report generation for {target_date}")
 

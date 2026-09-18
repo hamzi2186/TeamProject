@@ -2,9 +2,18 @@ from datetime import date, datetime, time, timezone
 from uuid import UUID
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.shared_reads import CallRead, ConversationRead, EmailRead, LeadRead, SmsMessageRead
+from app.core.logging import logger
+from app.models.shared_reads import (
+    CallRead,
+    CampaignRead,
+    ConversationRead,
+    EmailRead,
+    LeadRead,
+    SmsMessageRead,
+)
 from app.schemas.enums import Channel, Direction
 from app.schemas.reports import TimelineEvent
 
@@ -126,59 +135,76 @@ async def fetch_lead_events(
     return events
 
 
-async def get_active_leads_for_date(
+async def fetch_lead_campaign_names(
     session: AsyncSession,
-    target_date: date,
+    lead_id: UUID,
+) -> list[str]:
+    """
+    Best-effort campaign enrichment for a single lead.
+
+    Campaign IDs are derived from conversation records and the calls table.
+    The `campaigns` table is owned by a later platform phase, so any missing
+    table (or otherwise unavailable data) degrades gracefully to an empty list.
+    """
+    try:
+        conv_campaign_ids = (
+            (
+                await session.execute(
+                    select(ConversationRead.campaign_id).where(
+                        ConversationRead.lead_id == lead_id,
+                        ConversationRead.campaign_id.is_not(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        call_campaign_ids = (
+            (
+                await session.execute(
+                    select(CallRead.campaign_id).where(
+                        CallRead.lead_id == lead_id,
+                        CallRead.campaign_id.is_not(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    except DBAPIError as exc:
+        logger.debug(f"Campaign context unavailable for lead {lead_id}: {exc}")
+        return []
+
+    campaign_ids = {str(cid) for cid in [*conv_campaign_ids, *call_campaign_ids] if cid}
+    if not campaign_ids:
+        return []
+
+    try:
+        rows = (
+            await session.execute(
+                select(CampaignRead.name).where(CampaignRead.id.in_(campaign_ids))
+            )
+        ).scalars().all()
+    except DBAPIError as exc:
+        logger.debug(f"Campaign names unavailable for lead {lead_id}: {exc}")
+        return []
+
+    return sorted({name for name in rows if name})
+
+
+async def get_all_leads(
+    session: AsyncSession,
     user_id: UUID | None = None,
 ) -> list[LeadRead]:
     """
-    Finds all leads that had outreach activity (calls, SMS, emails, or updated status)
-    on the target date. If no activity is found, returns all leads registered for the user.
+    Returns all leads registered in the shared database (optionally scoped to a user).
+
+    The midnight report covers every lead, so unlike the previous date-based
+    active-lead discovery, no activity filter is applied.
     """
-    start_dt = datetime.combine(target_date, time.min, tzinfo=timezone.utc)
-    end_dt = datetime.combine(target_date, time.max, tzinfo=timezone.utc)
-
-    # Collect lead_ids with activity on this day
-    active_lead_ids: set[UUID] = set()
-
-    call_q = select(CallRead.lead_id).where(
-        and_(CallRead.started_at >= start_dt, CallRead.started_at <= end_dt)
-    )
-    for row in (await session.execute(call_q)).scalars().all():
-        active_lead_ids.add(row)
-
-    sms_q = select(SmsMessageRead.lead_id).where(
-        and_(
-            SmsMessageRead.sent_or_received_at >= start_dt,
-            SmsMessageRead.sent_or_received_at <= end_dt,
-        )
-    )
-    for row in (await session.execute(sms_q)).scalars().all():
-        active_lead_ids.add(row)
-
-    email_q = select(EmailRead.lead_id).where(
-        and_(
-            EmailRead.sent_or_received_at >= start_dt,
-            EmailRead.sent_or_received_at <= end_dt,
-        )
-    )
-    for row in (await session.execute(email_q)).scalars().all():
-        active_lead_ids.add(row)
-
-    lead_filters = []
-    if user_id:
-        lead_filters.append(LeadRead.user_id == user_id)
-
-    if active_lead_ids:
-        lead_filters.append(LeadRead.id.in_(active_lead_ids))
-        stmt = select(LeadRead).where(and_(*lead_filters))
-        leads = (await session.execute(stmt)).scalars().all()
-        return list(leads)
-
-    # Fallback: if no touchpoints occurred specifically on that date, return all leads
     stmt = select(LeadRead)
-    if lead_filters:
-        stmt = stmt.where(and_(*lead_filters))
-    stmt = stmt.order_by(LeadRead.created_at.desc()).limit(100)
+    if user_id:
+        stmt = stmt.where(LeadRead.user_id == user_id)
+    stmt = stmt.order_by(LeadRead.created_at.asc())
     leads = (await session.execute(stmt)).scalars().all()
     return list(leads)

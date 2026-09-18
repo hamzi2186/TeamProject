@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     reports_storage_dir: str = str(
         Path(__file__).resolve().parent.parent.parent / "storage" / "reports"
     )
-    report_run_cron: str = "59 23 * * *"
+    report_run_cron: str = "0 0 * * *"
 
     # CORS
     frontend_origins: str = (

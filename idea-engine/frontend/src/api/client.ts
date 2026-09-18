@@ -1,33 +1,40 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8006";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8006").replace(/\/$/, "");
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status = 0) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 export async function apiClient<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
-  const headers = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(options.headers || {}),
+    ...(options.headers as Record<string, string> | undefined),
   };
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  const response = await fetch(url, { ...options, headers });
 
   if (!response.ok) {
-    let errorMsg = `HTTP Error ${response.status}`;
+    let errorMsg = `Request failed with status ${response.status}`;
     try {
       const errJson = await response.json();
       if (errJson.error?.message) {
         errorMsg = errJson.error.message;
       }
     } catch {
-      // Ignore json parse error
+      // Fall back to the generic message
     }
-    throw new Error(errorMsg);
+    throw new ApiError(errorMsg, response.status);
   }
 
   const json = await response.json();
   if (json.success === false) {
-    throw new Error(json.error?.message || "API request failed");
+    throw new ApiError(json.error?.message || "The request could not be completed.", 400);
   }
 
   return json.data as T;

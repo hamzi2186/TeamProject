@@ -1,180 +1,178 @@
-import React from "react";
-import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  Phone,
-  Mail,
-  Globe,
-  Activity,
-} from "lucide-react";
+import { Link, useParams } from "react-router-dom";
+import { Activity, ArrowLeft, Globe, Mail, Phone, Target } from "lucide-react";
 
-import { fetchLeadJourney } from "../api/reports";
-import { StatusBadge } from "../components/StatusBadge";
-import { ChannelBadge } from "../components/ChannelBadge";
-import { TimelineView } from "../components/TimelineView";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { ChannelBadge } from "@/components/shared/ChannelBadge";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton";
+import { Timeline } from "@/components/shared/Timeline";
+import { useLeadJourney } from "@/features/reports/hooks/use-reports";
 
-export const LeadSummaryPage: React.FC = () => {
+export function LeadSummaryPage() {
   const { leadId } = useParams<{ leadId: string }>();
-
-  const { data: journey, isLoading, isError, error } = useQuery({
-    queryKey: ["leadJourney", leadId],
-    queryFn: () => fetchLeadJourney(leadId!),
-    enabled: !!leadId,
-  });
+  const { data: journey, isLoading, isError, refetch } = useLeadJourney(leadId);
 
   if (isLoading) {
     return (
-      <div style={{ padding: "60px", textAlign: "center", color: "var(--text-muted)" }}>
-        Loading lead journey...
+      <div className="flex flex-col gap-6">
+        <PageHeader title="Lead journey" description="Loading lead intelligence..." />
+        <LoadingSkeleton variant="cards" rows={3} />
       </div>
     );
   }
 
   if (isError || !journey) {
     return (
-      <div style={{ padding: "60px", textAlign: "center", color: "var(--danger)" }}>
-        <p>Could not load lead journey: {(error as Error)?.message || "Not found"}</p>
-        <Link to="/reports" className="btn-secondary" style={{ marginTop: "16px", display: "inline-flex" }}>
-          Back to Reports
-        </Link>
+      <div className="rounded-lg border border-border bg-card shadow-sm">
+        <ErrorState
+          title="Could not load this lead"
+          description="The lead journey could not be fetched. Please try again."
+          onRetry={() => refetch()}
+        />
+        <div className="pb-6 text-center">
+          <Button variant="secondary" size="sm" asChild>
+            <Link to="/reports">Back to reports</Link>
+          </Button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-      {/* Top Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-        <Link to="/reports" className="btn-secondary" style={{ height: "36px", padding: "0 10px" }}>
-          <ArrowLeft size={16} />
-          Back
-        </Link>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-start gap-3">
+        <Button variant="secondary" size="icon" asChild aria-label="Back to reports">
+          <Link to="/reports">
+            <ArrowLeft className="size-4" />
+          </Link>
+        </Button>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <h1 style={{ fontSize: "22px", fontWeight: 700 }}>{journey.lead_name}</h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-foreground">
+              {journey.lead_name}
+            </h1>
             <StatusBadge status={journey.final_outcome} />
           </div>
-          <p style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "2px" }}>
-            Lead 360° Intelligence & Chronological Journey
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            Lead journey across calling, SMS, and email outreach.
           </p>
         </div>
       </div>
 
-      {/* Two-Column Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px", alignItems: "start" }}>
-        {/* Left Column: Lead Profile & Intelligence Summary */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Contact Card */}
-          <div className="card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <span style={{ fontWeight: 600, fontSize: "14px", borderBottom: "1px solid var(--border)", paddingBottom: "8px" }}>
-              Lead Contact Info
-            </span>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "13px" }}>
+      <div className="grid items-start gap-5 lg:grid-cols-3">
+        <div className="flex flex-col gap-4 lg:col-span-1">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Lead contact</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2.5 text-[13px]">
               {journey.email && (
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <Mail size={14} color="var(--text-muted)" />
-                  <span>{journey.email}</span>
-                </div>
+                <p className="flex items-center gap-2">
+                  <Mail className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="break-all">{journey.email}</span>
+                </p>
               )}
               {journey.phone && (
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <Phone size={14} color="var(--text-muted)" />
-                  <span>{journey.phone}</span>
-                </div>
+                <p className="flex items-center gap-2">
+                  <Phone className="size-4 shrink-0 text-muted-foreground" />
+                  {journey.phone}
+                </p>
               )}
               {journey.website_url && (
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <Globe size={14} color="var(--text-muted)" />
-                  <a href={journey.website_url} target="_blank" rel="noreferrer" style={{ color: "var(--info)" }}>
+                <p className="flex items-center gap-2">
+                  <Globe className="size-4 shrink-0 text-muted-foreground" />
+                  <a
+                    href={journey.website_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="break-all text-info hover:underline"
+                  >
                     {journey.website_url}
                   </a>
-                </div>
+                </p>
               )}
-            </div>
+              {journey.campaigns.length > 0 && (
+                <p className="flex items-center gap-2">
+                  <Target className="size-4 shrink-0 text-muted-foreground" />
+                  {journey.campaigns.join(", ")}
+                </p>
+              )}
 
-            <div style={{ marginTop: "6px" }}>
-              <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
-                Channels Engaged
-              </span>
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                {journey.channels_used.map((c) => (
-                  <ChannelBadge key={c} channel={c} />
-                ))}
+              <div className="pt-2">
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">Channels engaged</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {journey.channels_used.length === 0 ? (
+                    <span className="text-[12px] text-muted-foreground">None recorded yet</span>
+                  ) : (
+                    journey.channels_used.map((channel) => (
+                      <ChannelBadge key={channel} channel={channel} />
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
-          {/* Intelligence Synthesis Card */}
-          <div className="card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <span style={{ fontWeight: 600, fontSize: "14px", borderBottom: "1px solid var(--border)", paddingBottom: "8px" }}>
-              Intelligence Evaluation
-            </span>
-
-            <div>
-              <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block", fontWeight: 600 }}>
-                Approach Timeline:
-              </span>
-              <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "2px", lineHeight: 1.45 }}>
-                {journey.approach_summary}
-              </p>
-            </div>
-
-            <div>
-              <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block", fontWeight: 600 }}>
-                Conversation Synthesis:
-              </span>
-              <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "2px", lineHeight: 1.45 }}>
-                {journey.conversation_summary}
-              </p>
-            </div>
-
-            <div>
-              <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block", fontWeight: 600 }}>
-                Outcome Evidence:
-              </span>
-              <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "2px", lineHeight: 1.45 }}>
-                {journey.outcome_reason}
-              </p>
-            </div>
-
-            {journey.recommended_next_action && (
-              <div
-                style={{
-                  backgroundColor: "rgba(198, 241, 53, 0.15)",
-                  border: "1px solid rgba(31, 90, 58, 0.2)",
-                  padding: "10px",
-                  borderRadius: "var(--radius-md)",
-                  marginTop: "4px",
-                }}
-              >
-                <span style={{ fontSize: "11.5px", fontWeight: 700, color: "var(--brand-deep)", display: "block" }}>
-                  Recommended Action:
-                </span>
-                <p style={{ fontSize: "12.5px", color: "var(--text-primary)", marginTop: "2px" }}>
-                  {journey.recommended_next_action}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Intelligence evaluation</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3.5 text-[13px]">
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground">Approach timeline</h3>
+                <p className="mt-1 leading-relaxed text-secondary-foreground">
+                  {journey.approach_summary || "Outreach not yet initiated."}
                 </p>
               </div>
-            )}
-          </div>
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground">Conversation synthesis</h3>
+                <p className="mt-1 leading-relaxed text-secondary-foreground">
+                  {journey.conversation_summary || "No active conversation turns."}
+                </p>
+              </div>
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground">Outcome evidence</h3>
+                <p className="mt-1 leading-relaxed text-secondary-foreground">
+                  {journey.outcome_reason}
+                </p>
+              </div>
+              {journey.recommended_next_action && (
+                <div className="rounded-md border border-brand-deep/20 bg-brand/10 p-3">
+                  <p className="text-xs font-semibold text-brand-deep">Recommended action</p>
+                  <p className="mt-1 text-[13px] text-foreground">{journey.recommended_next_action}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
-        {/* Right Column: Chronological Touchpoint Timeline */}
-        <div className="card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border)", paddingBottom: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Activity size={16} color="var(--brand-deep)" />
-              <span style={{ fontWeight: 600, fontSize: "15px" }}>Cross-Channel Journey Timeline</span>
-            </div>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-              {journey.timeline.length} touchpoint(s)
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="size-4 text-brand-deep" aria-hidden />
+              Cross-channel journey timeline
+            </CardTitle>
+            <span className="text-xs text-muted-foreground">
+              {journey.timeline.length} touchpoint{journey.timeline.length === 1 ? "" : "s"}
             </span>
-          </div>
-
-          <TimelineView events={journey.timeline} />
-        </div>
+          </CardHeader>
+          <CardContent>
+            {journey.timeline.length === 0 ? (
+              <EmptyState
+                icon={Activity}
+                title="No touchpoints recorded"
+                description="This lead has no persisted calling, SMS, or email interactions yet."
+              />
+            ) : (
+              <Timeline events={journey.timeline} />
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
-};
+}

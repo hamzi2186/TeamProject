@@ -37,6 +37,7 @@ class LeadReportItemResponse(BaseModel):
     last_activity_at: datetime | None = None
     source_event_count: int = 0
     channels_used: list[Channel] = Field(default_factory=list)
+    campaigns: list[str] = Field(default_factory=list)
     timeline: list[TimelineEvent] = Field(default_factory=list)
 
 
@@ -86,4 +87,5 @@ class LeadJourneySummaryResponse(BaseModel):
     outcome_reason: str
     recommended_next_action: str | None = None
     channels_used: list[Channel] = Field(default_factory=list)
+    campaigns: list[str] = Field(default_factory=list)
     timeline: list[TimelineEvent] = Field(default_factory=list)

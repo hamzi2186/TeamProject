@@ -56,6 +56,7 @@ async def test_api_full_flow(client: AsyncClient, test_session: AsyncSession):
     summary_data = lead_summary_resp.json()["data"]
     assert summary_data["lead_name"] == "Bruce Wayne (Wayne Enterprises)"
     assert summary_data["final_outcome"] == "INTERESTED"
+    assert summary_data["campaigns"] == []
     assert len(summary_data["timeline"]) == 1
 
     # 4. Test POST /idea/reports/daily/generate
@@ -84,6 +85,7 @@ async def test_api_full_flow(client: AsyncClient, test_session: AsyncSession):
     assert detail_data["id"] == report_id
     assert len(detail_data["items"]) == 1
     assert detail_data["items"][0]["final_outcome"] == "INTERESTED"
+    assert detail_data["items"][0]["campaigns"] == []
 
     # 7. Test GET /idea/reports/{report_id}/download
     download_resp = await client.get(f"/idea/reports/{report_id}/download")

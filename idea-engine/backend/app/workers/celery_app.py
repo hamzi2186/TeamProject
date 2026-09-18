@@ -20,10 +20,10 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-# Parse cron from settings or default to 23:59 UTC
+# Parse cron from settings or default to exactly 00:00 UTC (midnight)
 cron_parts = settings.report_run_cron.split()
-minute = cron_parts[0] if len(cron_parts) > 0 else "59"
-hour = cron_parts[1] if len(cron_parts) > 1 else "23"
+minute = cron_parts[0] if len(cron_parts) > 0 else "0"
+hour = cron_parts[1] if len(cron_parts) > 1 else "0"
 
 celery_app.conf.beat_schedule = {
     "run-end-of-day-lead-report": {

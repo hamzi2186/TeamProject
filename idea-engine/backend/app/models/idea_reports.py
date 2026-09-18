@@ -6,11 +6,13 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base, GUID
@@ -81,6 +83,11 @@ class IdeaLeadReportItem(Base):
     first_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_event_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    campaigns: Mapped[list] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        default=list,
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

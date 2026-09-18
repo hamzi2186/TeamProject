@@ -125,22 +125,29 @@ async def _call_tpi_llm_summary(
         actor = "Lead" if e.direction == Direction.INBOUND else "T Rex Agent"
         transcript_lines.append(f"[{e.timestamp.strftime('%H:%M')} - {e.channel.value}] {actor}: {e.content[:120]}")
 
-    payload = {
-        "prompt": (
-            f"Provide a concise, 2-3 sentence executive summary of the following outreach conversations with lead '{lead_name}'. "
-            "Highlight key interest or objections stated."
-        ),
-        "context": "\n".join(transcript_lines),
-    }
-
     settings = get_settings()
-    headers = {}
-    if settings.tpi_internal_service_token:
-        headers["x-tpi-service-token"] = settings.tpi_internal_service_token
+    headers = {
+        "x-tpi-service-token": settings.tpi_internal_service_token,
+        "x-consumer-engine": "idea",
+    }
+    payload = {
+        "system_prompt": (
+            "You are T Rex's lead intelligence summarizer. "
+            "Provide a concise, 2-3 sentence executive summary of the outreach conversations. "
+            "Highlight key interest or objections stated. Rely only on the provided context."
+        ),
+        "user_prompt": (
+            f"Outreach conversations with lead '{lead_name}':\n"
+            + "\n".join(transcript_lines)
+        ),
+        "consumer": "idea",
+        "temperature": 0.2,
+        "max_tokens": 300,
+    }
 
     async with httpx.AsyncClient(timeout=4.0) as client:
         resp = await client.post(
-            f"{tpi_base_url}/api/v1/tpi/llm/generate",
+            f"{tpi_base_url}/api/v1/internal/llm/generate",
             json=payload,
             headers=headers,
         )
@@ -148,6 +155,4 @@ async def _call_tpi_llm_summary(
             data = resp.json()
             if isinstance(data, dict) and "text" in data:
                 return data["text"]
-            if isinstance(data, dict) and "data" in data and isinstance(data["data"], dict):
-                return data["data"].get("text")
     return None

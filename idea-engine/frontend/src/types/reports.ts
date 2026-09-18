@@ -46,6 +46,7 @@ export interface LeadReportItem {
   last_activity_at?: string;
   source_event_count: number;
   channels_used: Channel[];
+  campaigns: string[];
   timeline: TimelineEvent[];
 }
 
@@ -91,5 +92,6 @@ export interface LeadJourneySummary {
   outcome_reason: string;
   recommended_next_action?: string;
   channels_used: Channel[];
+  campaigns: string[];
   timeline: TimelineEvent[];
 }

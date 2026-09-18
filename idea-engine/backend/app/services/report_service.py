@@ -19,7 +19,11 @@ from app.schemas.reports import (
     LeadJourneySummaryResponse,
     LeadReportItemResponse,
 )
-from app.services.aggregator import fetch_lead_events, get_active_leads_for_date
+from app.services.aggregator import (
+    fetch_lead_campaign_names,
+    fetch_lead_events,
+    get_all_leads,
+)
 from app.services.docx_generator import build_daily_docx_report
 from app.services.outcome_evaluator import evaluate_lead_outcome
 from app.services.summarizer import (
@@ -35,8 +39,8 @@ async def generate_daily_report(
 ) -> IdeaReportRunResponse:
     """
     Executes the full Idea Engine pipeline:
-    1. Finds active leads for the target date.
-    2. Aggregates multi-channel events for each lead.
+    1. Selects every lead registered in the shared database.
+    2. Aggregates the full multi-channel event history for each lead.
     3. Evaluates canonical outcomes and extracts evidence.
     4. Synthesizes approach timelines and conversation narratives.
     5. Persists report run and items into database.
@@ -72,13 +76,14 @@ async def generate_daily_report(
     await session.refresh(report_run)
 
     try:
-        # Fetch active leads for this date
-        leads = await get_active_leads_for_date(session, target_date, user_id=user_id)
+        # Fetch all leads to be covered by this report
+        leads = await get_all_leads(session, user_id=user_id)
         lead_items_response: list[LeadReportItemResponse] = []
         counts = IdeaReportSummaryCounts()
 
         for lead in leads:
             events = await fetch_lead_events(session, lead.id)
+            campaigns = await fetch_lead_campaign_names(session, lead.id)
 
             # Evaluate outcome
             final_outcome, outcome_reason, next_action = evaluate_lead_outcome(
@@ -113,6 +118,7 @@ async def generate_daily_report(
                 first_activity_at=first_act,
                 last_activity_at=last_act,
                 source_event_count=len(events),
+                campaigns=campaigns,
             )
             session.add(item_record)
 
@@ -133,6 +139,7 @@ async def generate_daily_report(
                     last_activity_at=last_act,
                     source_event_count=len(events),
                     channels_used=channels_used,
+                    campaigns=campaigns,
                     timeline=events,
                 )
             )
@@ -298,6 +305,7 @@ async def get_report_detail(
                 last_activity_at=item.last_activity_at,
                 source_event_count=item.source_event_count,
                 channels_used=channels,
+                campaigns=item.campaigns or [],
                 timeline=timeline,
             )
         )
@@ -342,6 +350,7 @@ async def get_lead_journey_summary(
     lead_name = lead.display_name or f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "Unnamed Lead"
     conv_summary = await synthesize_conversation_summary(events, lead_name)
     channels = sorted(list({e.channel for e in events}), key=lambda c: c.value)
+    campaigns = await fetch_lead_campaign_names(session, lead_id)
 
     return LeadJourneySummaryResponse(
         lead_id=lead.id,
@@ -356,6 +365,7 @@ async def get_lead_journey_summary(
         outcome_reason=outcome_reason,
         recommended_next_action=next_action,
         channels_used=channels,
+        campaigns=campaigns,
         timeline=events,
     )
 

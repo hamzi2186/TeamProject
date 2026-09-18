@@ -1,230 +1,200 @@
-import React from "react";
+import { useCallback } from "react";
 import { Link } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Download,
-  FileText,
-  Play,
-  Calendar,
-  Clock,
-  ArrowRight,
-} from "lucide-react";
+import { Download, FileText, Play } from "lucide-react";
 
-import { fetchDailyReports, generateDailyReport } from "../api/reports";
-import { getDownloadUrl } from "../api/client";
-import { MetricCard } from "../components/MetricCard";
-import { StatusBadge } from "../components/StatusBadge";
+import { getDownloadUrl } from "@/api/client";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { MetricCard } from "@/components/shared/MetricCard";
+import { ChartCard } from "@/components/shared/ChartCard";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton";
+import { DataTable, type DataTableColumn } from "@/components/shared/DataTable";
+import { Reveal } from "@/components/shared/Reveal";
+import { TrendLineChart } from "@/features/reports/components/TrendLineChart";
+import { OutcomeDistributionChart } from "@/features/reports/components/OutcomeDistributionChart";
+import { useDailyReports, useGenerateDailyReport } from "@/features/reports/hooks/use-reports";
+import { cn } from "@/lib/utils";
+import type { IdeaReportRun } from "@/types/reports";
 
-export const ReportsOverviewPage: React.FC = () => {
-  const queryClient = useQueryClient();
+const NO_RESPONSE = [
+  { label: "Interested", key: "interested" as const, className: "bg-success/10 text-success border border-success/25" },
+  { label: "Converted", key: "converted" as const, className: "bg-brand-deep/10 text-brand-deep border border-brand-deep/25" },
+  { label: "Follow-up", key: "follow_up_required" as const, className: "bg-warning/10 text-warning border border-warning/25" },
+  { label: "Not interested", key: "not_interested" as const, className: "bg-surface-subtle text-secondary-foreground border border-border" },
+  { label: "DNC", key: "do_not_contact" as const, className: "bg-danger/10 text-danger border border-danger/25" },
+];
 
-  const { data: reports, isLoading, isError, error } = useQuery({
-    queryKey: ["dailyReports"],
-    queryFn: () => fetchDailyReports(1, 30),
-  });
+export function ReportsOverviewPage() {
+  const { data: reports, isLoading, isError, refetch } = useDailyReports(1, 30);
+  const generateMutation = useGenerateDailyReport();
 
-  const generateMutation = useMutation({
-    mutationFn: (targetDate?: string) => generateDailyReport(targetDate),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["dailyReports"] });
-    },
-  });
-
-  const handleGenerate = (targetDate?: string) => {
-    generateMutation.mutate(targetDate || undefined);
-  };
-
-  // Calculate cumulative stats across available runs
-  const totalReports = reports?.length || 0;
   const latestRun = reports && reports.length > 0 ? reports[0] : null;
+  const counts = latestRun?.summary_counts;
+
+  const handleGenerate = useCallback(
+    () => generateMutation.mutate(undefined),
+    [generateMutation],
+  );
+
+  const columns: DataTableColumn<IdeaReportRun>[] = [
+    {
+      key: "date",
+      header: "Report date",
+      render: (report) => (
+        <span className="font-semibold text-foreground">{report.report_date}</span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (report) => <StatusBadge status={report.status} />,
+    },
+    {
+      key: "total",
+      header: "Total leads",
+      render: (report) => <span className="font-medium">{report.total_leads}</span>,
+    },
+    {
+      key: "outcomes",
+      header: "Outcome breakdown",
+      render: (report) => {
+        const summary = report.summary_counts;
+        const visible = NO_RESPONSE.filter((item) => summary[item.key] > 0);
+        if (visible.length === 0) return <span className="text-muted-foreground">No outcomes</span>;
+        return (
+          <div className="flex flex-wrap gap-1.5">
+            {visible.map((item) => (
+              <span key={item.key} className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", item.className)}>
+                {summary[item.key]} {item.label}
+              </span>
+            ))}
+          </div>
+        );
+      },
+    },
+    {
+      key: "generated",
+      header: "Generated time",
+      render: (report) => (
+        <span className="text-muted-foreground">
+          {report.generated_at ? new Date(report.generated_at).toLocaleString() : "Pending"}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      align: "right",
+      render: (report) => (
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" size="sm" asChild>
+            <Link to={`/reports/${report.id}`}>View detail</Link>
+          </Button>
+          <Button size="sm" asChild>
+            <a href={getDownloadUrl(report.id)} download>
+              <Download className="size-3.5" />
+              Download DOCX
+            </a>
+          </Button>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-      {/* Page Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
-        <div>
-          <h1 style={{ fontSize: "26px", fontWeight: 700, letterSpacing: "-0.02em", color: "var(--text-primary)" }}>
-            Daily Lead Intelligence Reports
-          </h1>
-          <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginTop: "4px" }}>
-            Aggregated cross-channel insights from Calling, SMS, and Mailer outreach.
-          </p>
-        </div>
-
-        <div style={{ display: "flex", gap: "10px" }}>
-          <button
-            className="btn-primary"
-            onClick={() => handleGenerate()}
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Daily lead reports"
+        description="Cross-channel lead intelligence aggregated every day at 00:00 UTC."
+        actions={
+          <Button
+            variant={reports && reports.length > 0 ? "secondary" : "default"}
+            onClick={handleGenerate}
             disabled={generateMutation.isPending}
           >
             {generateMutation.isPending ? (
               <>
-                <Clock size={16} className="animate-spin" />
-                Generating Report...
+                <Play className="size-4 animate-spin" aria-hidden />
+                Generating...
               </>
             ) : (
               <>
-                <Play size={15} fill="currentColor" />
-                Generate Today's Report
+                <Play className="size-4" aria-hidden />
+                Generate report
               </>
             )}
-          </button>
+          </Button>
+        }
+      />
+
+      {isLoading ? (
+        <LoadingSkeleton variant="table" rows={7} />
+      ) : isError ? (
+        <div className="rounded-lg border border-border bg-card shadow-sm">
+          <ErrorState
+            title="Could not load reports"
+            description="The report list could not be fetched. Please try again."
+            onRetry={() => refetch()}
+          />
         </div>
-      </div>
+      ) : (
+        <>
+          <Reveal className="grid auto-rows-fr grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+            <MetricCard label="Total reports" value={reports?.length ?? 0} subtext="Generated to date" />
+            <MetricCard label="Latest reviewed leads" value={latestRun?.total_leads ?? 0} subtext={latestRun ? `Date: ${latestRun.report_date}` : "No reports yet"} />
+            <MetricCard label="Latest interested" value={counts?.interested ?? 0} accentColor="#1F6A45" subtext="High conversion potential" />
+            <MetricCard label="Latest converted" value={counts?.converted ?? 0} accentColor="#1F5A3A" subtext="Deals closed" />
+            <MetricCard label="Follow-ups required" value={counts?.follow_up_required ?? 0} accentColor="#C98924" subtext="Action needed" />
+            <MetricCard label="Do not contact" value={counts?.do_not_contact ?? 0} accentColor="#C93A32" subtext="Suppressed leads" />
+          </Reveal>
 
-      {/* KPI Overview Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "14px" }}>
-        <MetricCard
-          label="Total Reports"
-          value={totalReports}
-          subtext="Generated to date"
-        />
-        <MetricCard
-          label="Latest Reviewed Leads"
-          value={latestRun ? latestRun.total_leads : 0}
-          subtext={latestRun ? `Date: ${latestRun.report_date}` : "No reports yet"}
-        />
-        <MetricCard
-          label="Latest Interested"
-          value={latestRun ? latestRun.summary_counts.interested : 0}
-          accentColor="var(--success)"
-          subtext="High conversion potential"
-        />
-        <MetricCard
-          label="Latest Converted"
-          value={latestRun ? latestRun.summary_counts.converted : 0}
-          accentColor="var(--brand-deep)"
-          subtext="Deals closed"
-        />
-        <MetricCard
-          label="Follow-ups Required"
-          value={latestRun ? latestRun.summary_counts.follow_up_required : 0}
-          accentColor="var(--warning)"
-          subtext="Action needed"
-        />
-        <MetricCard
-          label="Do Not Contact"
-          value={latestRun ? latestRun.summary_counts.do_not_contact : 0}
-          accentColor="var(--danger)"
-          subtext="Suppressed leads"
-        />
-      </div>
+          {(reports && reports.length === 0) || !reports ? (
+            <div className="rounded-lg border border-border bg-card shadow-sm">
+              <EmptyState
+                icon={FileText}
+                title="No reports generated yet"
+                description="Generate today's report to compile every lead's calling, SMS, and email history into a DOCX dossier."
+                action={
+                  <Button size="sm" onClick={handleGenerate} disabled={generateMutation.isPending}>
+                    <Play className="size-3.5" aria-hidden />
+                    Generate first report
+                  </Button>
+                }
+              />
+            </div>
+          ) : (
+            <>
+              {reports.length > 1 && (
+                <Reveal className="grid gap-4 lg:grid-cols-2">
+                  <ChartCard title="Outcome trend" description="Interested, converted, and follow-up leads over the last reports.">
+                    <TrendLineChart reports={reports} />
+                  </ChartCard>
+                  <ChartCard title="Latest outcome mix" description={`Distribution for the report of ${latestRun?.report_date}`}>
+                    {counts ? <OutcomeDistributionChart counts={counts} /> : null}
+                  </ChartCard>
+                </Reveal>
+              )}
 
-      {/* Reports Table Section */}
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontWeight: 600, fontSize: "15px" }}>Report History</span>
-          <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-            Download ready (.docx)
-          </span>
-        </div>
-
-        {isLoading ? (
-          <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-            Loading reports history...
-          </div>
-        ) : isError ? (
-          <div style={{ padding: "40px", textAlign: "center", color: "var(--danger)" }}>
-            Failed to load reports: {(error as Error).message}
-          </div>
-        ) : !reports || reports.length === 0 ? (
-          <div style={{ padding: "48px 24px", textAlign: "center" }}>
-            <FileText size={36} color="var(--text-muted)" style={{ margin: "0 auto 12px", display: "block" }} />
-            <h3 style={{ fontSize: "16px", fontWeight: 600, color: "var(--text-primary)" }}>No reports generated yet</h3>
-            <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "4px", maxWidth: "420px", margin: "4px auto 16px" }}>
-              Click "Generate Today's Report" above or run the seed script to compile lead interactions across Calling, SMS, and Mailer.
-            </p>
-            <button className="btn-secondary" onClick={() => handleGenerate()}>
-              Generate First Report
-            </button>
-          </div>
-        ) : (
-          <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Report Date</th>
-                  <th>Status</th>
-                  <th>Total Leads</th>
-                  <th>Outcome Breakdown</th>
-                  <th>Generated Time</th>
-                  <th style={{ textAlign: "right" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reports.map((report) => {
-                  const counts = report.summary_counts;
-                  return (
-                    <tr key={report.id}>
-                      <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <Calendar size={15} color="var(--text-muted)" />
-                          <span style={{ fontWeight: 600 }}>{report.report_date}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <StatusBadge status={report.status} />
-                      </td>
-                      <td style={{ fontWeight: 500 }}>
-                        {report.total_leads} leads
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                          {counts.interested > 0 && (
-                            <span style={{ fontSize: "11px", color: "var(--success)", backgroundColor: "rgba(31, 106, 69, 0.1)", padding: "1px 6px", borderRadius: "3px", fontWeight: 600 }}>
-                              {counts.interested} Interested
-                            </span>
-                          )}
-                          {counts.converted > 0 && (
-                            <span style={{ fontSize: "11px", color: "var(--brand-deep)", backgroundColor: "rgba(31, 90, 58, 0.1)", padding: "1px 6px", borderRadius: "3px", fontWeight: 600 }}>
-                              {counts.converted} Converted
-                            </span>
-                          )}
-                          {counts.follow_up_required > 0 && (
-                            <span style={{ fontSize: "11px", color: "var(--warning)", backgroundColor: "rgba(201, 137, 36, 0.1)", padding: "1px 6px", borderRadius: "3px", fontWeight: 600 }}>
-                              {counts.follow_up_required} Follow-up
-                            </span>
-                          )}
-                          {counts.not_interested > 0 && (
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)", backgroundColor: "var(--surface-subtle)", padding: "1px 6px", borderRadius: "3px" }}>
-                              {counts.not_interested} Not Int.
-                            </span>
-                          )}
-                          {counts.do_not_contact > 0 && (
-                            <span style={{ fontSize: "11px", color: "var(--danger)", backgroundColor: "rgba(201, 58, 50, 0.1)", padding: "1px 6px", borderRadius: "3px" }}>
-                              {counts.do_not_contact} DNC
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                        {report.generated_at ? new Date(report.generated_at).toLocaleString() : "Pending"}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <div style={{ display: "inline-flex", gap: "8px" }}>
-                          <Link to={`/reports/${report.id}`} className="btn-secondary" style={{ height: "32px", padding: "0 10px", fontSize: "12px" }}>
-                            View Detail
-                            <ArrowRight size={13} />
-                          </Link>
-                          <a
-                            href={getDownloadUrl(report.id)}
-                            download
-                            className="btn-primary"
-                            style={{ height: "32px", padding: "0 12px", fontSize: "12px" }}
-                          >
-                            <Download size={13} />
-                            Download DOCX
-                          </a>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              <Reveal className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-[18px] font-semibold tracking-tight text-foreground">Report history</h2>
+                  <Badge variant="outline">DOCX ready to download</Badge>
+                </div>
+                <DataTable
+                  aria-label="Report history"
+                  columns={columns}
+                  rows={reports}
+                  getRowKey={(report) => report.id}
+                />
+              </Reveal>
+            </>
+          )}
+        </>
+      )}
     </div>
   );
-};
+}

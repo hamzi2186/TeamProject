@@ -35,6 +35,7 @@ def test_docx_generation():
         last_activity_at=now,
         source_event_count=2,
         channels_used=[Channel.EMAIL, Channel.SMS],
+        campaigns=["Q3 Enterprise Outreach"],
         timeline=[],
     )
 
@@ -74,7 +75,13 @@ def test_docx_generation():
         # Read back with docx library
         doc = docx.Document(result_path)
         text = "\n".join(p.text for p in doc.paragraphs)
-        assert "T REX — DAILY LEAD INTELLIGENCE REPORT" in text
-        assert "Jane Doe (Acme Corp)" in text
-        assert "INTERESTED" in text
+        table_text = "\n".join(
+            cell.text for table in doc.tables for row in table.rows for cell in row.cells
+        )
+        combined = text + "\n" + table_text
+        assert "T REX — DAILY LEAD INTELLIGENCE REPORT" in combined
+        assert "Jane Doe (Acme Corp)" in combined
+        assert "INTERESTED" in combined
+        assert "Q3 Enterprise Outreach" in table_text
+        assert "Factual Event Log" in text or "No persisted communication events found" in text
         assert len(doc.tables) >= 2
