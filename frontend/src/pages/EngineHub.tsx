@@ -26,7 +26,7 @@ const engines: EngineCardProps[] = [
     path: "/sms/",
     icon: MessageSquare,
     tone: "purple",
-    statusText: "Available",
+    statusText: "Active",
     isExternalOrPending: false,
   },
   {

@@ -26,6 +26,10 @@ export function AppShell() {
             <PhoneCall size={18} />
             Calling Engine
           </NavLink>
+          <a href="/sms/">
+            <MessageSquare size={18} />
+            SMS Engine
+          </a>
           <NavLink to="/leads">
             <Users size={18} />
             Leads
@@ -35,10 +39,6 @@ export function AppShell() {
             HubSpot
           </NavLink>
           <div className="sidebar-section-divider">Other Engines</div>
-          <a href="/sms/">
-            <MessageSquare size={18} />
-            SMS Engine
-          </a>
           <span className="sidebar-item disabled" title="Cold outreach email mailer">
             <Mail size={18} />
             Mailer Engine
