@@ -13,21 +13,13 @@ import {
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ClientKbStage, ClientKbStatus, Lead, leadsApi } from "../api/leads";
-
-const ACTIVE_STAGES = new Set<ClientKbStage>([
-  "QUEUED",
-  "CRAWLING",
-  "EXTRACTING",
-  "EMBEDDING",
-]);
-
-const STAGE_ORDER: ClientKbStage[] = [
-  "QUEUED",
-  "CRAWLING",
-  "EXTRACTING",
-  "EMBEDDING",
-  "READY",
-];
+import {
+  ACTIVE_STAGES,
+  STAGE_ORDER,
+  normalizeStage,
+  sanitizeErrorMessage,
+  useKnowledgeBasePolling,
+} from "./knowledgeBasePoller";
 
 type StepState = "completed" | "active" | "pending" | "failed";
 
@@ -57,16 +49,18 @@ function ClientKnowledgeCard({
   status,
   loading,
   error,
+  pollingWarning,
   working,
   onBuild,
 }: {
   status: ClientKbStatus | null;
   loading: boolean;
   error: string;
+  pollingWarning: string;
   working: boolean;
   onBuild: () => void;
 }) {
-  const stage = status?.processing_stage ?? "NOT_STARTED";
+  const stage = status?.processing_stage ? normalizeStage(status.processing_stage) : "NOT_STARTED";
   const active = ACTIVE_STAGES.has(stage);
   const timeline = ["Job queued", "Crawling", "Extracting", "Embedding", "Ready"];
   const finalLabel = stage === "PARTIAL" ? "Partially completed" : stage === "FAILED" ? "Failed" : "Ready";
@@ -122,9 +116,20 @@ function ClientKnowledgeCard({
         </div>
       )}
 
+      {pollingWarning && (
+        <div
+          className="notice warning"
+          role="status"
+          style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}
+        >
+          <LoaderCircle className="kb-spinner" size={15} />
+          <span>{pollingWarning}</span>
+        </div>
+      )}
+
       {(status?.error_message || error) && (
         <div className={stage === "PARTIAL" ? "notice warning" : "notice error"} role="alert">
-          {status?.error_message || error}
+          {sanitizeErrorMessage(status?.error_message || error)}
         </div>
       )}
 
@@ -143,49 +148,35 @@ function ClientKnowledgeCard({
 export function LeadDetailPage() {
   const { leadId = "" } = useParams();
   const [lead, setLead] = useState<Lead | null>(null);
-  const [kbStatus, setKbStatus] = useState<ClientKbStatus | null>(null);
   const [error, setError] = useState("");
-  const [kbError, setKbError] = useState("");
-  const [kbLoading, setKbLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [pollVersion, setPollVersion] = useState(0);
+
+  const {
+    status: kbStatus,
+    loading: kbLoading,
+    error: kbError,
+    pollingWarning,
+    setStatus: setKbStatus,
+    setError: setKbError,
+  } = useKnowledgeBasePolling(leadId, leadsApi.knowledgeBaseStatus, Boolean(lead), pollVersion);
 
   useEffect(() => {
     let cancelled = false;
     leadsApi.detail(leadId)
       .then((value) => { if (!cancelled) setLead(value); })
       .catch((caught: unknown) => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : "Could not load lead.");
+        if (!cancelled) {
+          const raw = caught instanceof Error ? caught.message : "Could not load lead.";
+          setError(
+            raw.toLowerCase().includes("failed to fetch")
+              ? "Connection interrupted — could not reach server. Please refresh to retry."
+              : raw
+          );
+        }
       });
     return () => { cancelled = true; };
   }, [leadId]);
-
-  useEffect(() => {
-    if (!lead) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const poll = async () => {
-      try {
-        const next = await leadsApi.knowledgeBaseStatus(leadId);
-        if (cancelled) return;
-        setKbStatus(next);
-        setKbError("");
-        setKbLoading(false);
-        if (ACTIVE_STAGES.has(next.processing_stage)) timer = setTimeout(poll, 2500);
-      } catch (caught: unknown) {
-        if (cancelled) return;
-        setKbLoading(false);
-        setKbError(caught instanceof Error ? caught.message : "Could not load Client KB status.");
-      }
-    };
-
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [lead, leadId, pollVersion]);
 
   const buildOrRefresh = async () => {
     if (!lead || working) return;
@@ -199,7 +190,12 @@ export function LeadDetailPage() {
       if (next.website_id && !lead.website_id) setLead({ ...lead, website_id: next.website_id });
       setPollVersion((value) => value + 1);
     } catch (caught: unknown) {
-      setKbError(caught instanceof Error ? caught.message : "Could not start Client KB processing.");
+      const message = caught instanceof Error ? caught.message : "Could not start Client KB processing.";
+      setKbError(
+        message.toLowerCase().includes("failed to fetch")
+          ? "Connection interrupted. Could not reach server to start processing."
+          : message
+      );
     } finally {
       setWorking(false);
     }
@@ -241,6 +237,7 @@ export function LeadDetailPage() {
           status={kbStatus}
           loading={kbLoading}
           error={kbError}
+          pollingWarning={pollingWarning}
           working={working}
           onBuild={buildOrRefresh}
         />
