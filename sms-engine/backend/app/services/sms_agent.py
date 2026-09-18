@@ -1,11 +1,11 @@
 import json
 
-from groq import AsyncGroq
 from pydantic import ValidationError
 
 from app.core.config import get_settings
 from app.models.sms import SmsConversation, SmsMessage
 from app.schemas.agent import AgentDecision
+from app.services.tpi_client import TPIServiceError, generate_llm_text
 
 
 class AgentUnavailable(RuntimeError):
@@ -13,13 +13,6 @@ class AgentUnavailable(RuntimeError):
 
 
 class SmsAgent:
-    def __init__(self) -> None:
-        settings = get_settings()
-        if not settings.groq_api_key:
-            raise AgentUnavailable("GROQ_API_KEY is not configured")
-        self.settings = settings
-        self.client = AsyncGroq(api_key=settings.groq_api_key)
-
     async def decide(
         self, conversation: SmsConversation, history: list[SmsMessage]
     ) -> AgentDecision:
@@ -49,32 +42,16 @@ Rules:
 - Respect a clear rejection immediately.
 - Classify a terminal outcome only when the lead's message supports it.
 - Use null outcome when the conversation should continue.
+- Return only JSON matching this schema: {json.dumps(AgentDecision.model_json_schema())}
 """.strip()
-        schema = AgentDecision.model_json_schema()
-        response = await self.client.chat.completions.create(
-            model=self.settings.groq_model,
-            temperature=self.settings.groq_temperature,
-            max_completion_tokens=self.settings.groq_max_completion_tokens,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Return only the requested structured SMS decision.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "sms_agent_decision",
-                    "strict": True,
-                    "schema": schema,
-                },
-            },
-        )
-        content = response.choices[0].message.content
-        if not content:
-            raise AgentUnavailable("Groq returned an empty decision")
+        settings = get_settings()
         try:
+            content = await generate_llm_text(
+                system_prompt="Return only the requested structured SMS decision as JSON.",
+                user_prompt=prompt,
+                temperature=settings.llm_temperature,
+                max_tokens=settings.llm_max_tokens,
+            )
             return AgentDecision.model_validate(json.loads(content))
-        except (json.JSONDecodeError, ValidationError) as exc:
-            raise AgentUnavailable("Groq returned an invalid SMS decision") from exc
+        except (json.JSONDecodeError, ValidationError, TPIServiceError) as exc:
+            raise AgentUnavailable("TPI returned an invalid SMS decision") from exc

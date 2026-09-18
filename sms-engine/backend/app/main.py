@@ -11,6 +11,9 @@ from app.core.config import get_settings
 from app.db.session import engine
 
 settings = get_settings()
+allowed_frontend_origins = list(
+    dict.fromkeys((settings.frontend_url, settings.platform_frontend_url))
+)
 
 
 @asynccontextmanager
@@ -22,7 +25,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="T Rex SMS Engine", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=allowed_frontend_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

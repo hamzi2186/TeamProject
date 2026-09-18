@@ -11,7 +11,7 @@ from app.db.session import SessionLocal
 from app.models.sms import SmsConsent, SmsConversation, SmsMessage
 from app.services.compliance import is_quiet_hours, seconds_until_quiet_hours_end
 from app.services.events import publish_conversation_event
-from app.services.groq_agent import SmsAgent
+from app.services.sms_agent import SmsAgent
 from app.services.tpi_client import send_sms
 from app.workers.celery_app import celery_app
 

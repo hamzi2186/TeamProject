@@ -198,34 +198,19 @@ services:
         condition: service_healthy
 
   # ── SMS Engine ─────────────────────────────────────────────────────────
-  sms-db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${SMS_DB_USER:-sms}
-      POSTGRES_PASSWORD: ${SMS_DB_PASSWORD:-sms}
-      POSTGRES_DB: ${SMS_DB_NAME:-trex_sms}
-    ports:
-      - "5433:5432"
-    volumes:
-      - sms_db_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${SMS_DB_USER:-sms}"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   sms-backend:
     build: ./sms-engine/backend
     env_file:
       - ./sms-engine/backend/.env
+      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${SMS_DB_USER:-sms}:${SMS_DB_PASSWORD:-sms}@sms-db:5432/${SMS_DB_NAME:-trex_sms}
       REDIS_URL: redis://redis:6379/1
       TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
       FRONTEND_URL: http://localhost:5175
+      PLATFORM_FRONTEND_URL: http://localhost:5173
       SMS_ENGINE_INTERNAL_BASE_URL: http://sms-backend:8004
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8004"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8004"]
     ports:
       - "8004:8004"
     depends_on:
@@ -235,8 +220,6 @@ services:
         condition: service_healthy
         required: false
       backend:
-        condition: service_healthy
-      sms-db:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
@@ -248,8 +231,8 @@ services:
     build: ./sms-engine/backend
     env_file:
       - ./sms-engine/backend/.env
+      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${SMS_DB_USER:-sms}:${SMS_DB_PASSWORD:-sms}@sms-db:5432/${SMS_DB_NAME:-trex_sms}
       REDIS_URL: redis://redis:6379/1
       TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       AUTH_JWKS_URL: http://backend:8000/.well-known/jwks.json
@@ -278,4 +261,3 @@ services:
 
 volumes:
   redis_data:
-  sms_db_data:

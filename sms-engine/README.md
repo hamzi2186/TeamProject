@@ -1,23 +1,39 @@
 # T Rex SMS Engine
 
-Standalone SMS conversation module with a React frontend, FastAPI API, Celery worker, Redis-backed WebSocket events, and SMS-owned Postgres migrations.
+SMS conversation module with a React frontend, FastAPI API, Celery worker, and Redis-backed WebSocket events. It runs inside the unified T Rex stack and also supports an isolated local-development stack.
 
 ## Ownership
 
-- `sms-engine` owns conversation logic, consent, outcomes, persistence, Groq prompts, and Groq credentials.
-- `tpi-engine` owns Twilio credentials, sending, webhook signature validation, and provider event normalization.
+- `sms-engine` owns conversation logic, consent, outcomes, persistence, and SMS decision prompts.
+- `tpi-engine` owns Twilio and Groq credentials, provider calls, webhook signature validation, and normalized provider responses.
 - Root platform teams own users, HubSpot leads, campaigns, and Client KB retrieval.
+- `backend/alembic` owns the canonical shared-database migration chain used by the integrated stack.
+- `sms-engine/backend/alembic` exists only for the isolated local Postgres workflow.
 
-This module intentionally keeps its LLM provider inside the module instead of TPI. Each communication module supplies its own LLM provider and key.
+The SMS worker calls TPI's internal LLM contract for generated decisions and TPI's internal SMS contract for delivery. No third-party provider SDK or credential belongs in this module.
 
-## Local run
+## Unified T Rex run
+
+The root `docker-compose.yml` uses the canonical `backend/.env` database connection, so SMS shares the same Supabase project as the other engines. The root backend applies the canonical migration chain before SMS starts.
+
+```bash
+TPI_API_BASE_URL=https://trex-central-tpi.onrender.com \
+  docker compose up --build backend sms-backend sms-worker sms-frontend frontend \
+  --scale tpi=0
+```
+
+Open the platform at `http://localhost:5173` and choose **SMS Engine**. The unified route is `http://localhost:5173/sms/`; direct SMS frontend access is available at `http://localhost:5175/sms/`.
+
+## Isolated local run
 
 ```bash
 cp sms-engine/.env.example sms-engine/.env
 docker compose --env-file sms-engine/.env -f sms-engine/docker-compose.yml up --build
 ```
 
-Open `http://localhost:5174`. The local UI uses the configured demo user UUID. Starting autonomous outreach requires `GROQ_API_KEY`; real delivery additionally requires Twilio credentials and a US SMS-capable sender.
+Open `http://localhost:5174/sms/`. The isolated stack uses local Postgres on port `5433`, Redis on `6380`, the SMS API on `8002`, and the TPI API on `8001`. It is for module development only and is not the instructor-required integrated database topology.
+
+Starting autonomous outreach requires TPI's LLM provider to be configured. Real delivery additionally requires Twilio credentials and an SMS-capable sender configured only in TPI.
 
 ## Dummy campaign and mock SMS
 
@@ -47,7 +63,7 @@ curl -X POST http://localhost:8001/api/v1/mock/sms/reply \
   }'
 ```
 
-Set `SMS_PROVIDER=twilio` when live credentials and a sender number are available.
+Set `SMS_PROVIDER=twilio` only in TPI when live credentials and a sender number are available. Keep `mock` for safe route and workflow testing.
 
 ## Bulk campaigns
 
@@ -68,6 +84,18 @@ Status callback:   POST {PUBLIC_WEBHOOK_BASE_URL}/api/v1/provider/twilio/sms/sta
 ```
 
 TPI validates `X-Twilio-Signature` using the exact public URL before forwarding normalized events.
+
+## Repository layout
+
+- `backend/` — SMS API, workers, domain models, and isolated migration metadata
+- `frontend/` — SMS inbox and campaign UI mounted at `/sms/`
+- `scripts/` and `fixtures/` — isolated demo support
+- `../contracts/` — shared cross-engine and TPI contracts
+- `../tpi-engine/` — Twilio adapter and provider-facing webhooks
+- `../docs/agent-knowledge/sms/` — Agent Engine product knowledge
+- `../backend/alembic/versions/20260918_0008_sms_engine.py` — canonical shared migration
+
+Provider adapters must remain in TPI, and other engines must communicate with SMS through HTTP contracts rather than importing SMS internals.
 
 ## Checks
 

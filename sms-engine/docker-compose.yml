@@ -45,6 +45,8 @@ services:
       TWILIO_DEFAULT_SMS_FROM_NUMBER: ${TWILIO_SMS_FROM_NUMBER:-}
       TWILIO_MESSAGING_SERVICE_SID: ${TWILIO_MESSAGING_SERVICE_SID:-}
       PUBLIC_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_BASE_URL:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       SMS_PROVIDER: ${SMS_PROVIDER:-mock}
       MOCK_SMS_FROM_NUMBER: ${MOCK_SMS_FROM_NUMBER:-+15555550100}
     ports:
@@ -62,9 +64,8 @@ services:
       TPI_API_BASE_URL: ${TPI_API_BASE_URL:-http://tpi:8001}
       TPI_INTERNAL_SERVICE_TOKEN: ${TPI_INTERNAL_SERVICE_TOKEN:-local-tpi-token}
       SMS_INTERNAL_SERVICE_TOKEN: ${SMS_INTERNAL_SERVICE_TOKEN:-local-sms-token}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
-      GROQ_MAX_COMPLETION_TOKENS: ${GROQ_MAX_COMPLETION_TOKENS:-1024}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.25}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1024}
       SMS_PROVIDER: ${SMS_PROVIDER:-mock}
     command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8002"]
     ports:

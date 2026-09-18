@@ -19,4 +19,4 @@ A: Twilio signs the exact externally visible URL. Ensure `PUBLIC_WEBHOOK_BASE_UR
 A: The SMS Engine records the opt-out and prevents additional automated sends for that recipient.
 
 **Q: Why is the AI not generating the next reply?**  
-A: Confirm the SMS worker is consuming `sms.conversations`, the conversation is active and consented, and the SMS Engine's configured language-model provider is available. Provider credentials for message generation belong to the SMS module, while Twilio remains in TPI.
+A: Confirm the SMS worker is consuming `sms.conversations`, the conversation is active and consented, and TPI's LLM provider is available. Groq and Twilio provider credentials both belong only in TPI.

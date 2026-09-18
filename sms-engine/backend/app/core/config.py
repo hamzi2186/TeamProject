@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     frontend_url: str = "http://localhost:5174"
+    platform_frontend_url: str = "http://localhost:5173"
     database_url: str
     redis_url: str = "redis://localhost:6379/1"
 
@@ -24,10 +25,8 @@ class Settings(BaseSettings):
     sms_internal_service_token: str
     sms_provider: Literal["twilio", "mock"] = "twilio"
 
-    groq_api_key: str | None = None
-    groq_model: str = "openai/gpt-oss-20b"
-    groq_temperature: float = 0.25
-    groq_max_completion_tokens: int = 1024
+    llm_temperature: float = 0.25
+    llm_max_tokens: int = 1024
 
     default_timezone: str = "America/New_York"
     quiet_hours_start: int = 20
