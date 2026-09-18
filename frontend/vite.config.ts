@@ -17,6 +17,12 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      // Proxy /sms to SMS Engine frontend
+      "/sms": {
+        target: process.env.SMS_FRONTEND_URL || "http://localhost:5175",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 });
