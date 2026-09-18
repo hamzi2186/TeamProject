@@ -5,10 +5,16 @@ from typing import Protocol
 
 from sqlalchemy import DateTime, Text, select, update
 from sqlalchemy.dialects.postgresql import JSONB, UUID, insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.core.config import get_settings
+from app.providers.hubspot.errors import (
+    HubSpotConfigurationError,
+    HubSpotError,
+    ProviderTemporaryError,
+)
 
 
 class Base(DeclarativeBase):
@@ -64,14 +70,20 @@ class ConnectionRepository(Protocol):
 def session_factory() -> async_sessionmaker[AsyncSession]:
     database_url = get_settings().database_url
     if not database_url:
-        raise RuntimeError("DATABASE_URL is required for HubSpot persistence")
+        raise HubSpotConfigurationError("DATABASE_URL is required for HubSpot persistence")
     engine = create_async_engine(database_url, pool_pre_ping=True, pool_size=5, max_overflow=5)
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
 class SqlAlchemyConnectionRepository:
     def __init__(self, factory: async_sessionmaker[AsyncSession] | None = None) -> None:
-        self._factory = factory or session_factory()
+        self._custom_factory = factory
+
+    @property
+    def _factory(self) -> async_sessionmaker[AsyncSession]:
+        if self._custom_factory is not None:
+            return self._custom_factory
+        return session_factory()
 
     async def upsert(
         self,
@@ -109,19 +121,29 @@ class SqlAlchemyConnectionRepository:
             )
             .returning(HubSpotConnectionRecord.id)
         )
-        async with self._factory() as session:
-            saved_id = (await session.execute(statement)).scalar_one()
-            await session.commit()
-            return await self._get_by_id(session, saved_id)
+        try:
+            async with self._factory() as session:
+                saved_id = (await session.execute(statement)).scalar_one()
+                await session.commit()
+                return await self._get_by_id(session, saved_id)
+        except HubSpotError:
+            raise
+        except (SQLAlchemyError, OSError) as exc:
+            raise ProviderTemporaryError("Database operation failed") from exc
 
     async def latest_for_user(self, user_id: uuid.UUID) -> HubSpotConnectionRecord | None:
-        async with self._factory() as session:
-            return await session.scalar(
-                select(HubSpotConnectionRecord)
-                .where(HubSpotConnectionRecord.user_id == user_id)
-                .order_by(HubSpotConnectionRecord.updated_at.desc())
-                .limit(1)
-            )
+        try:
+            async with self._factory() as session:
+                return await session.scalar(
+                    select(HubSpotConnectionRecord)
+                    .where(HubSpotConnectionRecord.user_id == user_id)
+                    .order_by(HubSpotConnectionRecord.updated_at.desc())
+                    .limit(1)
+                )
+        except HubSpotError:
+            raise
+        except (SQLAlchemyError, OSError) as exc:
+            raise ProviderTemporaryError("Database operation failed") from exc
 
     async def update_tokens(
         self,
@@ -133,36 +155,46 @@ class SqlAlchemyConnectionRepository:
         expires_at: datetime,
         scopes: list[str],
     ) -> HubSpotConnectionRecord:
-        async with self._factory() as session:
-            await session.execute(
-                update(HubSpotConnectionRecord)
-                .where(
-                    HubSpotConnectionRecord.id == connection_id,
-                    HubSpotConnectionRecord.user_id == user_id,
+        try:
+            async with self._factory() as session:
+                await session.execute(
+                    update(HubSpotConnectionRecord)
+                    .where(
+                        HubSpotConnectionRecord.id == connection_id,
+                        HubSpotConnectionRecord.user_id == user_id,
+                    )
+                    .values(
+                        encrypted_access_token=encrypted_access_token,
+                        encrypted_refresh_token=encrypted_refresh_token,
+                        expires_at=expires_at,
+                        scopes=scopes,
+                        status="connected",
+                        updated_at=datetime.now(UTC),
+                    )
                 )
-                .values(
-                    encrypted_access_token=encrypted_access_token,
-                    encrypted_refresh_token=encrypted_refresh_token,
-                    expires_at=expires_at,
-                    scopes=scopes,
-                    status="connected",
-                    updated_at=datetime.now(UTC),
-                )
-            )
-            await session.commit()
-            return await self._get_by_id(session, connection_id, user_id=user_id)
+                await session.commit()
+                return await self._get_by_id(session, connection_id, user_id=user_id)
+        except HubSpotError:
+            raise
+        except (SQLAlchemyError, OSError) as exc:
+            raise ProviderTemporaryError("Database operation failed") from exc
 
     async def set_status(
         self, connection_id: uuid.UUID, *, user_id: uuid.UUID | None = None, status: str
     ) -> None:
-        async with self._factory() as session:
-            stmt = update(HubSpotConnectionRecord).where(HubSpotConnectionRecord.id == connection_id)
-            if user_id is not None:
-                stmt = stmt.where(HubSpotConnectionRecord.user_id == user_id)
-            await session.execute(
-                stmt.values(status=status, updated_at=datetime.now(UTC))
-            )
-            await session.commit()
+        try:
+            async with self._factory() as session:
+                stmt = update(HubSpotConnectionRecord).where(HubSpotConnectionRecord.id == connection_id)
+                if user_id is not None:
+                    stmt = stmt.where(HubSpotConnectionRecord.user_id == user_id)
+                await session.execute(
+                    stmt.values(status=status, updated_at=datetime.now(UTC))
+                )
+                await session.commit()
+        except HubSpotError:
+            raise
+        except (SQLAlchemyError, OSError) as exc:
+            raise ProviderTemporaryError("Database operation failed") from exc
 
     async def _get_by_id(
         self, session: AsyncSession, connection_id: uuid.UUID, *, user_id: uuid.UUID | None = None
@@ -172,5 +204,5 @@ class SqlAlchemyConnectionRepository:
             statement = statement.where(HubSpotConnectionRecord.user_id == user_id)
         connection = await session.scalar(statement)
         if connection is None:
-            raise RuntimeError("HubSpot connection persistence failed")
+            raise ProviderTemporaryError("HubSpot connection persistence failed")
         return connection

@@ -499,3 +499,41 @@ def test_internal_authentication_and_api_responses_exclude_tokens(monkeypatch):
     assert "refresh_token" not in serialized
     assert "client_secret" not in serialized
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_repository_is_lazy_when_database_url_is_missing(monkeypatch):
+    import app.providers.hubspot.repository as repo_module
+    from app.providers.hubspot.errors import HubSpotConfigurationError
+
+    monkeypatch.setattr(repo_module, "get_settings", lambda: SimpleNamespace(database_url=""))
+    repo_module.session_factory.cache_clear()
+
+    # Instantiating repo must not raise
+    repo = repo_module.SqlAlchemyConnectionRepository()
+
+    # Accessing database when DATABASE_URL is missing must raise HubSpotConfigurationError
+    with pytest.raises(HubSpotConfigurationError) as exc_info:
+        await repo.latest_for_user(uuid4())
+    assert "DATABASE_URL is required" in str(exc_info.value)
+    repo_module.session_factory.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_repository_catches_db_error_as_provider_temporary_error():
+    from sqlalchemy.exc import OperationalError
+    from app.providers.hubspot.errors import ProviderTemporaryError
+
+    class FailingSession:
+        async def scalar(self, statement):
+            raise OperationalError("SELECT 1", {}, Exception("connection terminated"))
+
+    class FailingFactory:
+        @asynccontextmanager
+        async def __call__(self):
+            yield FailingSession()
+
+    repo = SqlAlchemyConnectionRepository(FailingFactory())
+    with pytest.raises(ProviderTemporaryError) as exc_info:
+        await repo.latest_for_user(uuid4())
+    assert "Database operation failed" in str(exc_info.value)

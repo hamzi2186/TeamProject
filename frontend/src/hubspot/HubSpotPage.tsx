@@ -3,12 +3,9 @@ import {
   CheckCircle2,
   Download,
   ExternalLink,
-  HelpCircle,
-  Key,
   LogOut,
   RefreshCw,
   Search,
-  ShieldCheck,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -30,6 +27,7 @@ export function HubSpotPage() {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
   const callbackOutcome = searchParams.get("hubspot");
   const callbackReason = searchParams.get("reason");
   const websiteIngestionFailureCount = new Set(
@@ -42,12 +40,6 @@ export function HubSpotPage() {
       : callbackReason === "denied"
         ? "HubSpot authorization was denied."
         : "HubSpot authorization could not be completed. Start the connection again.";
-
-  // Manual token input state
-  const [tokenInput, setTokenInput] = useState("");
-  const [connectingToken, setConnectingToken] = useState(false);
-  const [showGuide, setShowGuide] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,31 +65,6 @@ export function HubSpotPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  async function handleConnectToken(e: React.FormEvent) {
-    e.preventDefault();
-    const cleanToken = tokenInput.trim();
-    if (!cleanToken) {
-      setError("Please paste your HubSpot Private App Access Token.");
-      return;
-    }
-
-    setConnectingToken(true);
-    setError("");
-    try {
-      const newStatus = await hubspotApi.connectToken(cleanToken);
-      setStatus(newStatus);
-      setTokenInput("");
-      // Load contacts immediately
-      const page = await hubspotApi.contacts();
-      setContacts(page.contacts);
-      setNextAfter(page.next_after);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to connect with HubSpot token. Verify token scopes and try again.");
-    } finally {
-      setConnectingToken(false);
-    }
-  }
 
   async function handleOAuthConnect() {
     setWorking(true);
@@ -211,7 +178,7 @@ export function HubSpotPage() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="secondary" onClick={load} disabled={working || connectingToken}>
+          <button className="secondary" onClick={load} disabled={working}>
             <RefreshCw size={15} /> Refresh
           </button>
           {status?.connected && (
@@ -236,173 +203,31 @@ export function HubSpotPage() {
       {callbackOutcome === "connected" && <div className="notice success" role="status">HubSpot connected successfully.</div>}
       {callbackOutcome === "error" && <div className="notice error" role="alert">{callbackError}</div>}
       {!status?.connected ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          {/* Main Direct Access Card */}
-          <div
-            style={{
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-lg)",
-              padding: "32px 28px",
-              boxShadow: "var(--shadow-md)",
-            }}
+        <div
+          style={{
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-lg)",
+            padding: "32px 28px",
+            boxShadow: "var(--shadow-md)",
+          }}
+        >
+          <h2 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 8px", color: "var(--text-primary)" }}>
+            Connect HubSpot
+          </h2>
+          <p style={{ margin: "0 0 20px", fontSize: 14, color: "var(--text-secondary)" }}>
+            Sign in to HubSpot and authorize T Rex to securely access your CRM contacts.
+          </p>
+          <button
+            type="button"
+            className="primary"
+            onClick={handleOAuthConnect}
+            disabled={working}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
           >
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 20 }}>
-              <div
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 12,
-                  background: "rgba(255, 122, 89, 0.15)",
-                  border: "1px solid rgba(255, 122, 89, 0.3)",
-                  display: "grid",
-                  placeItems: "center",
-                  color: "#ff7a59",
-                }}
-              >
-                <Key size={24} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <h2 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 6px 0", color: "var(--text-primary)" }}>
-                  Direct HubSpot Login & Access
-                </h2>
-                <p style={{ margin: 0, fontSize: 14, color: "var(--text-secondary)" }}>
-                  Enter your HubSpot Private App Access Token below. Your token will authenticate your account and grant immediate CRM access.
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handleConnectToken} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div>
-                <label
-                  htmlFor="hubspot-token-input"
-                  style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 8, color: "var(--text-primary)" }}
-                >
-                  HubSpot Access Token (Private App)
-                </label>
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  <input
-                    id="hubspot-token-input"
-                    type="password"
-                    autoComplete="off"
-                    className="input"
-                    placeholder="pat-na1-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                    value={tokenInput}
-                    onChange={(e) => setTokenInput(e.target.value)}
-                    disabled={connectingToken}
-                    style={{ flex: 1, minWidth: 280, fontFamily: "monospace", fontSize: 13 }}
-                  />
-                  <button
-                    type="submit"
-                    className="primary"
-                    disabled={connectingToken || !tokenInput.trim()}
-                    style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 170, justifyContent: "center" }}
-                  >
-                    {connectingToken ? (
-                      <>
-                        <RefreshCw className="spin" size={16} /> Authenticating…
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck size={16} /> Authenticate & Access
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </form>
-
-            {/* Quick Helper / Instructions */}
-            <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => setShowGuide(!showGuide)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 13,
-                  color: "#38bdf8",
-                  padding: "4px 8px",
-                  borderRadius: 6,
-                }}
-              >
-                <HelpCircle size={15} />
-                {showGuide ? "Hide token instructions" : "Where do I find my HubSpot Access Token?"}
-              </button>
-
-              {showGuide && (
-                <div
-                  style={{
-                    marginTop: 14,
-                    padding: 16,
-                    background: "rgba(15, 23, 42, 0.6)",
-                    border: "1px solid rgba(56, 189, 248, 0.2)",
-                    borderRadius: 8,
-                    fontSize: 13.5,
-                    lineHeight: 1.6,
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  <ol style={{ margin: 0, paddingLeft: 20 }}>
-                    <li>
-                      Log in to your <strong>HubSpot Account</strong>.
-                    </li>
-                    <li>
-                      Click the <strong>Settings (Gear icon)</strong> in the top navigation bar.
-                    </li>
-                    <li>
-                      In the left sidebar under <i>Account Setup</i>, open <strong>Integrations</strong> &gt; <strong>Private Apps</strong>.
-                    </li>
-                    <li>
-                      Click <strong>Create a private app</strong> (name it e.g. <code>T Rex CRM</code>).
-                    </li>
-                    <li>
-                      Click the <strong>Scopes</strong> tab and check:
-                      <ul style={{ margin: "4px 0", paddingLeft: 20 }}>
-                        <li><code style={{ color: "#86efac" }}>crm.objects.contacts.read</code></li>
-                        <li><code style={{ color: "#86efac" }}>crm.objects.contacts.write</code></li>
-                      </ul>
-                    </li>
-                    <li>
-                      Click <strong>Create app</strong>, then confirm <strong>Continue creating</strong>.
-                    </li>
-                    <li>
-                      Click <strong>Show token</strong>, copy your token (starts with <code>pat-</code>), paste it into the input above, and click <strong>Authenticate & Access</strong>.
-                    </li>
-                  </ol>
-                </div>
-              )}
-            </div>
-
-            {/* Alternate OAuth Section */}
-            <div
-              style={{
-                marginTop: 24,
-                paddingTop: 16,
-                borderTop: "1px solid var(--border)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: 12,
-              }}
-            >
-              <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                Prefer standard OAuth browser login?
-              </span>
-              <button
-                type="button"
-                className="secondary compact"
-                onClick={handleOAuthConnect}
-                disabled={working}
-                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-              >
-                <ExternalLink size={14} /> Log in via OAuth
-              </button>
-            </div>
-          </div>
+            {working ? <RefreshCw className="spin" size={16} /> : <ExternalLink size={16} />}
+            {working ? "Connecting..." : "Connect HubSpot"}
+          </button>
         </div>
       ) : (
         <>
