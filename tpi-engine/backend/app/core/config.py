@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     frontend_url: str = "http://localhost:5173"
     tpi_internal_service_token: str
-    email_provider: Literal["smtp", "resend"] = "smtp"
+    email_provider: Literal["smtp", "resend", "brevo"] = "smtp"
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None
@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     resend_api_key: SecretStr | None = None
     resend_from_email: EmailStr | None = None
     resend_from_name: str = "T Rex"
+    brevo_api_key: SecretStr | None = None
+    brevo_from_email: EmailStr | None = None
+    brevo_from_name: str = "T Rex"
     database_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
 
@@ -140,10 +143,15 @@ class Settings(BaseSettings):
                 "SMTP_PASSWORD": self.smtp_password,
                 "SMTP_FROM_EMAIL": self.smtp_from_email,
             }
-        else:
+        elif self.email_provider == "resend":
             required = {
                 "RESEND_API_KEY": self.resend_api_key,
                 "RESEND_FROM_EMAIL": self.resend_from_email,
+            }
+        else:
+            required = {
+                "BREVO_API_KEY": self.brevo_api_key,
+                "BREVO_FROM_EMAIL": self.brevo_from_email,
             }
         missing = [
             name
@@ -167,6 +175,8 @@ class Settings(BaseSettings):
         "smtp_from_email",
         "resend_api_key",
         "resend_from_email",
+        "brevo_api_key",
+        "brevo_from_email",
         mode="before",
     )
     @classmethod

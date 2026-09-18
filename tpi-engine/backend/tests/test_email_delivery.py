@@ -8,6 +8,8 @@ from pydantic import ValidationError, SecretStr
 from app.api import dependencies, email_delivery
 from app.contracts.email import EmailDeliveryRequest
 from app.core.config import Settings
+from app.providers.brevo import adapter as brevo_adapter
+from app.providers.brevo.adapter import BrevoDeliveryError
 from app.providers.resend import adapter as resend_adapter
 from app.providers.resend.adapter import ResendDeliveryError
 from app.providers.smtp import adapter as smtp_adapter
@@ -104,11 +106,13 @@ async def test_internal_email_endpoint_sanitizes_smtp_failure(monkeypatch):
 async def test_smtp_mode_selects_only_smtp(monkeypatch):
     smtp_send = AsyncMock()
     resend_send = AsyncMock()
+    brevo_send = AsyncMock()
     monkeypatch.setattr(
         email_service, "get_settings", lambda: SimpleNamespace(email_provider="smtp")
     )
     monkeypatch.setattr(smtp_adapter, "send_email", smtp_send)
     monkeypatch.setattr(resend_adapter, "send_email", resend_send)
+    monkeypatch.setattr(brevo_adapter, "send_email", brevo_send)
 
     provider = await email_service.send_email(
         "person@example.com", "verify_email", {"code": "123456"}
@@ -117,17 +121,20 @@ async def test_smtp_mode_selects_only_smtp(monkeypatch):
     assert provider == "smtp"
     smtp_send.assert_awaited_once()
     resend_send.assert_not_awaited()
+    brevo_send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_resend_mode_selects_only_resend(monkeypatch):
     smtp_send = AsyncMock()
     resend_send = AsyncMock()
+    brevo_send = AsyncMock()
     monkeypatch.setattr(
         email_service, "get_settings", lambda: SimpleNamespace(email_provider="resend")
     )
     monkeypatch.setattr(smtp_adapter, "send_email", smtp_send)
     monkeypatch.setattr(resend_adapter, "send_email", resend_send)
+    monkeypatch.setattr(brevo_adapter, "send_email", brevo_send)
 
     provider = await email_service.send_email(
         "person@example.com", "reset_password", {"code": "654321"}
@@ -136,6 +143,29 @@ async def test_resend_mode_selects_only_resend(monkeypatch):
     assert provider == "resend"
     resend_send.assert_awaited_once()
     smtp_send.assert_not_awaited()
+    brevo_send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_brevo_mode_selects_only_brevo(monkeypatch):
+    smtp_send = AsyncMock()
+    resend_send = AsyncMock()
+    brevo_send = AsyncMock()
+    monkeypatch.setattr(
+        email_service, "get_settings", lambda: SimpleNamespace(email_provider="brevo")
+    )
+    monkeypatch.setattr(smtp_adapter, "send_email", smtp_send)
+    monkeypatch.setattr(resend_adapter, "send_email", resend_send)
+    monkeypatch.setattr(brevo_adapter, "send_email", brevo_send)
+
+    provider = await email_service.send_email(
+        "person@example.com", "verify_email", {"code": "123456"}
+    )
+
+    assert provider == "brevo"
+    brevo_send.assert_awaited_once()
+    smtp_send.assert_not_awaited()
+    resend_send.assert_not_awaited()
 
 
 def test_smtp_configuration_does_not_require_resend_fields():
@@ -147,6 +177,8 @@ def test_smtp_configuration_does_not_require_resend_fields():
             smtp_from_email="sender@example.com",
             resend_api_key="",
             resend_from_email="",
+            brevo_api_key="",
+            brevo_from_email="",
         )
     )
 
@@ -164,6 +196,8 @@ def test_resend_configuration_does_not_require_smtp_fields():
             smtp_username="",
             smtp_password="",
             smtp_from_email="",
+            brevo_api_key="",
+            brevo_from_email="",
         )
     )
 
@@ -171,11 +205,32 @@ def test_resend_configuration_does_not_require_smtp_fields():
     assert settings.smtp_host is None
 
 
+def test_brevo_configuration_does_not_require_smtp_or_resend_fields():
+    settings = Settings(
+        **settings_values(
+            email_provider="brevo",
+            brevo_api_key="brevo-api-key",
+            brevo_from_email="verified@example.com",
+            smtp_host="",
+            smtp_username="",
+            smtp_password="",
+            smtp_from_email="",
+            resend_api_key="",
+            resend_from_email="",
+        )
+    )
+
+    assert settings.email_provider == "brevo"
+    assert settings.smtp_host is None
+    assert settings.resend_api_key is None
+
+
 @pytest.mark.parametrize(
     ("provider", "values", "expected_field"),
     [
         ("smtp", {"smtp_password": "smtp-private-value"}, "SMTP_HOST"),
         ("resend", {"resend_api_key": "resend-private-value"}, "RESEND_FROM_EMAIL"),
+        ("brevo", {"brevo_api_key": "brevo-private-value"}, "BREVO_FROM_EMAIL"),
     ],
 )
 def test_missing_selected_provider_configuration_fails_safely(
@@ -188,6 +243,7 @@ def test_missing_selected_provider_configuration_fails_safely(
     assert expected_field in error
     assert "resend-private-value" not in error
     assert "smtp-private-value" not in error
+    assert "brevo-private-value" not in error
 
 
 @pytest.mark.asyncio
@@ -265,6 +321,104 @@ async def test_resend_provider_failure_is_sanitized(monkeypatch):
         resend_adapter,
         "send_email",
         AsyncMock(side_effect=ResendDeliveryError("api-key and private provider body")),
+    )
+    monkeypatch.setattr(email_delivery, "send_email", email_service.send_email)
+    monkeypatch.setattr(
+        dependencies,
+        "get_settings",
+        lambda: SimpleNamespace(tpi_internal_service_token="internal-test-token"),
+    )
+    payload = EmailDeliveryRequest(
+        to="person@example.com",
+        template="verify_email",
+        variables={"code": "123456"},
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        await email_delivery.deliver(payload, "internal-test-token")
+
+    assert caught.value.status_code == 502
+    assert caught.value.detail == "Email provider delivery failed"
+    assert "api-key" not in caught.value.detail
+
+
+@pytest.mark.asyncio
+async def test_brevo_adapter_uses_https_api_and_existing_template(monkeypatch):
+    request = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *, timeout):
+            request["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, *, headers, json):
+            request.update(url=url, headers=headers, json=json)
+            return FakeResponse()
+
+    monkeypatch.setattr(brevo_adapter.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(
+        brevo_adapter,
+        "get_settings",
+        lambda: SimpleNamespace(
+            brevo_api_key=SecretStr("brevo-api-key"),
+            brevo_from_email="verified@example.com",
+            brevo_from_name="T Rex",
+        ),
+    )
+
+    await brevo_adapter.send_email(
+        "person@example.com", "verify_email", {"code": "123456"}
+    )
+
+    assert request["url"] == "https://api.brevo.com/v3/smtp/email"
+    assert request["headers"]["api-key"]
+    assert request["json"]["sender"] == {
+        "email": "verified@example.com",
+        "name": "T Rex",
+    }
+    assert request["json"]["to"] == [{"email": "person@example.com"}]
+    assert request["json"]["subject"] == "Verify your T Rex account"
+    assert "123456" in request["json"]["textContent"]
+
+
+@pytest.mark.asyncio
+async def test_brevo_success_maps_to_existing_endpoint_contract(monkeypatch):
+    monkeypatch.setattr(email_delivery, "send_email", AsyncMock(return_value="brevo"))
+    monkeypatch.setattr(
+        dependencies,
+        "get_settings",
+        lambda: SimpleNamespace(tpi_internal_service_token="internal-test-token"),
+    )
+    payload = EmailDeliveryRequest(
+        to="person@example.com",
+        template="verify_email",
+        variables={"code": "123456"},
+    )
+
+    result = await email_delivery.deliver(payload, "internal-test-token")
+
+    assert result.accepted is True
+    assert result.transport == "brevo"
+
+
+@pytest.mark.asyncio
+async def test_brevo_provider_failure_is_sanitized(monkeypatch):
+    monkeypatch.setattr(
+        email_service, "get_settings", lambda: SimpleNamespace(email_provider="brevo")
+    )
+    monkeypatch.setattr(
+        brevo_adapter,
+        "send_email",
+        AsyncMock(side_effect=BrevoDeliveryError("api-key and private provider body")),
     )
     monkeypatch.setattr(email_delivery, "send_email", email_service.send_email)
     monkeypatch.setattr(
