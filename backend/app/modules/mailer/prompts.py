@@ -25,7 +25,7 @@ Rules:
 - If the lead is unsubscribing or requests no further contact, stop.
 - Keep it grounded in the lead's context and the campaign goal.
 - Return JSON only with fields: subject, text_body, should_continue, outcome, reason, follow_up_at.
-""""
+"""
 
 
 def build_followup_prompt(*, lead_identity: str, campaign_objective: str, recent_thread: str, client_kb: str) -> str:
