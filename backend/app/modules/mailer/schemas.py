@@ -24,6 +24,17 @@ class Envelope(BaseModel, Generic[T]):
     request_id: str
 
 
+class InternalEventResponse(BaseModel):
+    """What the internal event endpoints tell TPI. `accepted` false means the event matched
+    nothing of ours; TPI need not retry it."""
+
+    accepted: bool
+    status: str
+    duplicate: bool = False
+    conversation_id: UUID | None = None
+    reply_queued: bool = False
+
+
 class MailerMetrics(BaseModel):
     conversations: int = 0
     emails_sent: int = 0

@@ -1,11 +1,37 @@
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from app.modules.mailer.contracts import KBPassage
 from app.modules.mailer.exceptions import MailerProviderError
 from app.services.scraper_client import ScraperClient, ScraperClientError
 from app.tpi.llm_client import TPILLMClient, TPILLMError
+
+
+REPLY_TASK = "mailer.process_inbound_email"
+MAILER_QUEUE = "mailer.email"
+
+
+class CeleryReplyDispatcher:
+    """Queues a stored reply for a worker.
+
+    The task is sent by name, so importing this never loads the task code or needs a worker.
+    """
+
+    async def enqueue_reply(self, *, conversation_id: UUID, inbound_email_id: UUID) -> None:
+        from app.workers.celery_app import celery_app
+
+        # send_task publishes to the broker synchronously, so keep it off the event loop.
+        await asyncio.to_thread(
+            celery_app.send_task,
+            REPLY_TASK,
+            kwargs={
+                "conversation_id": str(conversation_id),
+                "inbound_email_id": str(inbound_email_id),
+            },
+            queue=MAILER_QUEUE,
+        )
 
 
 class TPILLMAdapter:

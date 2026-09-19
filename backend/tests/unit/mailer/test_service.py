@@ -322,7 +322,6 @@ async def test_a_reply_is_matched_persisted_answered_and_the_thread_continues(se
     assert answer["to"] == lead.email and answer["subject"] == "Re: Quick idea for Acme"
     assert answer["in_reply_to"] == event.internet_message_id
     assert answer["references"] == f"<sent-1@out.example> {event.internet_message_id}"
-    assert answer["idempotency_key"] == f"mailer:reply:resend:{event.event_id}"
     assert resolve_reply_to_token(extract_reply_to_token(answer["reply_to"]), SECRET) == first.conversation_id
 
     prompt = llm.calls[1]["user_prompt"]
@@ -333,6 +332,7 @@ async def test_a_reply_is_matched_persisted_answered_and_the_thread_continues(se
     assert [e.direction for e in await thread(repo, conversation)] == ["OUTBOUND", "INBOUND", "OUTBOUND"]
     inbound = (await thread(repo, conversation))[1]
     assert (inbound.delivery_status, inbound.from_address) == ("received", "sam@lead.example")
+    assert answer["idempotency_key"] == f"mailer:reply:{inbound.id}"  # stable across retries
     assert inbound.text_body == "Yes! Can you tell me about pricing?"
     assert (conversation.status, conversation.outcome, conversation.turn_count) == ("WAITING_FOR_LEAD", "INTERESTED", 2)
     assert await history(db) == [("CONTACTING", "SYSTEM"), ("INTERESTED", "AI")]
@@ -594,3 +594,127 @@ async def test_a_spam_complaint_is_treated_as_do_not_contact(service, llm, db):
     assert (result.status, result.outcome) == ("stopped", "DO_NOT_CONTACT")
     with pytest.raises(MailerStopCondition):
         await service.start_conversation(user_id=lead.user_id, lead_id=lead.id, campaign_id=uuid4())
+
+
+# -- the two phases: record fast, reply from a queue -------------------------------------------
+
+
+def recording_only(repo, settings):
+    """What a webhook handler builds: no model, no provider, no knowledge base."""
+    return MailerService(repository=repo, settings=settings)
+
+
+@pytest.mark.asyncio
+async def test_a_reply_can_be_recorded_by_a_service_that_has_no_model_or_provider(service, llm, provider, repo, db, settings):
+    lead, first = await started(service, llm, db)
+    events = recording_only(repo, settings)
+    event = reply(first.conversation_id)
+
+    recorded = await events.record_inbound_email(event)
+
+    assert recorded.status == "received" and recorded.email_id and recorded.conversation_id == first.conversation_id
+    conversation = await conversation_row(db, first.conversation_id)
+    stored = (await thread(repo, conversation))[1]
+    assert (stored.id, stored.direction, stored.delivery_status) == (recorded.email_id, "INBOUND", "received")
+    assert len(provider.sent) == 1 and len(llm.calls) == 1  # recording asked nobody for anything
+    assert conversation.turn_count == 1  # and nothing was answered
+
+
+@pytest.mark.asyncio
+async def test_a_service_that_only_records_refuses_to_reply_instead_of_inventing_one(repo, settings, service, llm, db):
+    lead, first = await started(service, llm, db)
+    events = recording_only(repo, settings)
+    recorded = await events.record_inbound_email(reply(first.conversation_id))
+    with pytest.raises(MailerConfigurationError):
+        await events.reply_to_inbound(conversation_id=recorded.conversation_id, inbound_email_id=recorded.email_id)
+    with pytest.raises(MailerConfigurationError):
+        await events.start_conversation(user_id=lead.user_id, lead_id=lead.id, campaign_id=uuid4())
+
+
+@pytest.mark.asyncio
+async def test_unsubscribing_and_closed_conversations_are_settled_while_recording(repo, settings, service, llm, db):
+    lead, first = await started(service, llm, db)
+    events = recording_only(repo, settings)
+    stopped = await events.record_inbound_email(reply(first.conversation_id, "Please unsubscribe me"))
+    assert (stopped.status, stopped.outcome) == ("stopped", "DO_NOT_CONTACT")
+    later = await events.record_inbound_email(reply(first.conversation_id, "wait, I changed my mind"))
+    assert later.status == "recorded" and later.email_id
+
+
+@pytest.mark.asyncio
+async def test_answering_a_stored_reply_twice_sends_one_email(service, llm, provider, db):
+    lead, first = await started(service, llm, db)
+    llm.responses.append(decision())
+    recorded = await service.record_inbound_email(reply(first.conversation_id))
+    args = {"conversation_id": recorded.conversation_id, "inbound_email_id": recorded.email_id}
+
+    assert (await service.reply_to_inbound(**args)).status == "replied"
+    assert (await service.reply_to_inbound(**args)).status == "already_answered"
+    assert len(provider.sent) == 2 and len(llm.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_reply_the_queue_lost_is_queued_again_when_the_provider_retries(service, llm, provider, db):
+    lead, first = await started(service, llm, db)
+    event = reply(first.conversation_id)
+
+    first_try = await service.record_inbound_email(event)
+    retry = await service.record_inbound_email(event)  # the provider re-sends: the reply was never answered
+    assert (first_try.status, retry.status) == ("received", "received")
+    assert retry.email_id == first_try.email_id
+
+    llm.responses.append(decision())
+    await service.reply_to_inbound(conversation_id=retry.conversation_id, inbound_email_id=retry.email_id)
+    assert (await service.record_inbound_email(event)).status == "duplicate"  # now it has been answered
+    assert len(provider.sent) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_stored_reply_cannot_be_answered_under_another_conversation_or_tenant(service, llm, provider, db):
+    lead_a, first_a = await started(service, llm, db)
+    lead_b, first_b = await started(service, llm, db)
+    recorded = await service.record_inbound_email(reply(first_a.conversation_id))
+
+    crossed = await service.reply_to_inbound(conversation_id=first_b.conversation_id, inbound_email_id=recorded.email_id)
+    assert crossed.status == "unmatched"
+    assert (await service.reply_to_inbound(conversation_id=uuid4(), inbound_email_id=recorded.email_id)).status == "unmatched"
+    assert (await service.reply_to_inbound(conversation_id=first_a.conversation_id, inbound_email_id=uuid4())).status == "unmatched"
+    # Pointing at our own outbound email is not a reply either.
+    outbound = first_a.email_id
+    assert (await service.reply_to_inbound(conversation_id=first_a.conversation_id, inbound_email_id=outbound)).status == "unmatched"
+    assert len(provider.sent) == 2 and len(llm.calls) == 2  # nobody was emailed, the model was never asked
+
+
+@pytest.mark.asyncio
+async def test_a_reply_queued_before_the_conversation_closed_is_not_answered(service, llm, repo, db, provider):
+    lead, first = await started(service, llm, db)
+    recorded = await service.record_inbound_email(reply(first.conversation_id))
+    await repo.update_conversation(user_id=lead.user_id, conversation_id=first.conversation_id, status="CANCELLED")
+    result = await service.reply_to_inbound(conversation_id=recorded.conversation_id, inbound_email_id=recorded.email_id)
+    assert result.status == "recorded" and len(provider.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_turn_limit_is_enforced_when_the_reply_is_generated(service, llm, provider, repo, db):
+    lead, first = await started(service, llm, db)
+    await repo.update_conversation(user_id=lead.user_id, conversation_id=first.conversation_id, add_turn=True)
+    await repo.update_conversation(user_id=lead.user_id, conversation_id=first.conversation_id, add_turn=True)  # 3 of 3
+    recorded = await service.record_inbound_email(reply(first.conversation_id))
+    assert recorded.status == "received"  # recording never judges the limit
+    result = await service.reply_to_inbound(conversation_id=recorded.conversation_id, inbound_email_id=recorded.email_id)
+    assert (result.status, result.outcome) == ("guardrail", "FOLLOW_UP_REQUIRED")
+    assert len(provider.sent) == 1 and len(llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_reply_cannot_be_answered_under_a_different_conversation_of_the_same_tenant(service, llm, provider, db):
+    lead = await make_lead(db)
+    llm.responses += [FIRST_EMAIL, FIRST_EMAIL]
+    one = await service.start_conversation(user_id=lead.user_id, lead_id=lead.id, campaign_id=uuid4())
+    two = await service.start_conversation(user_id=lead.user_id, lead_id=lead.id, campaign_id=uuid4())
+    assert one.conversation_id != two.conversation_id
+    recorded = await service.record_inbound_email(reply(one.conversation_id))
+
+    wrong = await service.reply_to_inbound(conversation_id=two.conversation_id, inbound_email_id=recorded.email_id)
+    assert wrong.status == "unmatched"
+    assert len(provider.sent) == 2 and len(llm.calls) == 2  # only the two opening emails ever went out

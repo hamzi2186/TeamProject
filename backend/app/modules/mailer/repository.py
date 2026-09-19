@@ -495,6 +495,30 @@ class MailerRepository:
             await self._db.flush()
         return email
 
+    async def get_email(self, *, user_id: UUID, email_id: UUID) -> Email | None:
+        return await self._db.scalar(
+            select(Email).where(Email.user_id == user_id, Email.id == email_id)
+        )
+
+    async def find_email_by_provider_id(
+        self,
+        *,
+        user_id: UUID,
+        provider: str,
+        provider_email_id: str | None,
+        direction: EmailDirection | str,
+    ) -> Email | None:
+        if not provider_email_id:
+            return None
+        return await self._db.scalar(
+            select(Email).where(
+                Email.user_id == user_id,
+                Email.provider == provider,
+                Email.provider_email_id == provider_email_id,
+                Email.direction == EmailDirection(direction).value,
+            )
+        )
+
     # -- idempotency ---------------------------------------------------------------------
 
     async def record_webhook_event(self, *, provider: str, provider_event_id: str) -> bool:

@@ -185,6 +185,12 @@ class EmailProvider(Protocol):
     ) -> SentEmail: ...
 
 
+class ReplyDispatcher(Protocol):
+    """Hands a stored reply to a worker, which runs `MailerService.reply_to_inbound`."""
+
+    async def enqueue_reply(self, *, conversation_id: UUID, inbound_email_id: UUID) -> None: ...
+
+
 class LLM(Protocol):
     async def generate_text(
         self,

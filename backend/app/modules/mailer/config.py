@@ -18,6 +18,10 @@ class MailerSettings(BaseSettings):
     mailer_reply_to_domain: str = ""
     mailer_reply_to_mailbox: str = "mailer"
 
+    # What TPI must present in X-Mailer-Service-Token when it forwards events. Unset means the
+    # internal event endpoints refuse every request rather than accept anyone.
+    mailer_internal_service_token: str = ""
+
     mailer_kb_top_k: int = Field(default=6, ge=1, le=20)
     mailer_thread_context_emails: int = Field(default=10, ge=1, le=50)
 

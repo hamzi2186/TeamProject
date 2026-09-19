@@ -9,12 +9,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import AuthenticatedUser, get_current_user
+from app.api.v1.routes.mailer_internal import router as internal_router
 from app.db.session import get_db
 from app.modules.mailer.repository import MailerRepository
 from app.modules.mailer.schemas import ConversationDetail, ConversationList, Envelope
 from app.modules.mailer.views import build_conversation_detail, build_conversation_list
 
 router = APIRouter(prefix="/api/v1", tags=["mailer"])
+router.include_router(internal_router)
 
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
