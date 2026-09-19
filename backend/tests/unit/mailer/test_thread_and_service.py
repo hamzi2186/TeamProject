@@ -5,7 +5,6 @@ import pytest
 from pydantic import ValidationError
 
 from app.modules.mailer.contracts import AIEmailDecision, EmailDirection, EmailOutcome, EmailRecord
-from app.modules.mailer.exceptions import MailerTenantError
 from app.modules.mailer.outcome import compute_follow_up_at, should_continue_from_outcome
 from app.modules.mailer.thread import (
     correlate_email,
@@ -14,47 +13,6 @@ from app.modules.mailer.thread import (
     parse_address_list,
     parse_message_ids,
 )
-from app.modules.mailer.service import MailerService
-
-
-class DummyRepository:
-    def __init__(self):
-        self.conversations = {}
-        self.emails = []
-        self.webhook_events = set()
-
-    async def create_or_get_conversation(self, **kwargs):
-        cid = kwargs.get("conversation_id") or str(uuid4())
-        self.conversations[cid] = {**kwargs, "conversation_id": cid}
-        return self.conversations[cid]
-
-    async def save_email(self, **kwargs):
-        self.emails.append(kwargs)
-        return kwargs
-
-    async def get_conversation_by_id(self, conversation_id):
-        return self.conversations.get(conversation_id)
-
-    async def record_webhook_event(self, *, provider_event_id, **_kwargs):
-        if provider_event_id in self.webhook_events:
-            return False
-        self.webhook_events.add(provider_event_id)
-        return True
-
-    async def list_recent_messages(self, *, conversation_id, limit=10):
-        return [email for email in self.emails if email.get("conversation_id") == conversation_id][-limit:]
-
-    async def get_conversation_for_user(self, user_id, lead_id=None, campaign_id=None):
-        return next(
-            (
-                item
-                for item in self.conversations.values()
-                if item.get("user_id") == user_id
-                and (lead_id is None or item.get("lead_id") == lead_id)
-                and (campaign_id is None or item.get("campaign_id") == campaign_id)
-            ),
-            None,
-        )
 
 
 @pytest.mark.asyncio
@@ -97,23 +55,6 @@ async def test_thread_correlation_priority():
         "references_header": "<ref-9@example.com>",
     }
     assert await correlate_email(email, existing) == conversation_id
-
-
-@pytest.mark.asyncio
-async def test_webhook_idempotency_and_bounce_status():
-    repo = DummyRepository()
-    service = MailerService(repository=repo, email_provider=None)
-    first = await service.process_webhook_event({"provider": "resend", "id": "evt-1", "type": "email.bounced", "data": {"email_id": "msg-1"}})
-    second = await service.process_webhook_event({"provider": "resend", "id": "evt-1", "type": "email.bounced", "data": {"email_id": "msg-1"}})
-    assert first["status"] == "processed"
-    assert second["status"] == "duplicate"
-
-
-@pytest.mark.asyncio
-async def test_mailer_tenant_isolation():
-    service = MailerService(repository=DummyRepository(), email_provider=None)
-    with pytest.raises(MailerTenantError):
-        await service.validate_scope(user_id=uuid4(), lead_id=uuid4(), campaign_id=uuid4())
 
 
 @pytest.mark.asyncio

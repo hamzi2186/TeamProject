@@ -1,191 +1,548 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any, TypeVar
 from uuid import UUID
 
-from app.modules.mailer.contracts import AIEmailDecision, EmailDirection, EmailOutcome
-from app.modules.mailer.exceptions import MailerTenantError, MailerValidationError
-from app.modules.mailer.outcome import classify_stop_condition, compute_follow_up_at, should_continue_from_outcome
-from app.modules.mailer.thread import correlate_email
+from pydantic import BaseModel, ValidationError
+
+from app.modules.mailer.config import MailerSettings, get_mailer_settings
+from app.modules.mailer.contracts import (
+    LLM,
+    AIEmailDecision,
+    ClientKnowledgeBase,
+    DeliveryEvent,
+    EmailDirection,
+    EmailOutcome,
+    EmailProvider,
+    GeneratedEmail,
+    InboundEmailEvent,
+    KBPassage,
+    SentEmail,
+)
+from app.modules.mailer.exceptions import (
+    MailerConfigurationError,
+    MailerProviderError,
+    MailerStopCondition,
+    MailerTenantError,
+    MailerValidationError,
+)
+from app.modules.mailer.outcome import (
+    classify_stop_condition,
+    html_to_text,
+    should_continue_from_outcome,
+    strip_quoted_reply,
+)
+from app.modules.mailer.prompts import (
+    SYSTEM_PROMPT,
+    build_first_email_prompt,
+    build_response_prompt,
+    extract_json_object,
+    format_kb,
+    format_thread,
+)
+from app.modules.mailer.repository import MailerRepository
+from app.modules.mailer.thread import (
+    build_reply_to_address,
+    correlate_email,
+    extract_reply_to_token,
+    make_reply_to_token,
+    normalize_message_id,
+    parse_message_ids,
+    resolve_reply_to_token,
+)
+
+M = TypeVar("M", bound=BaseModel)
+
+_CLOSED_STATUSES = {"CONCLUDED", "CANCELLED", "FAILED"}
+_NO_REPLY_OUTCOMES = {EmailOutcome.DO_NOT_CONTACT, EmailOutcome.FAILED}
+_DEFAULT_OBJECTIVE = "Start a helpful, low-pressure conversation about how we can help this lead."
+# The campaign objective is not stored on the conversation, so the first email keeps it in its
+# payload for the replies that follow.
+_CONTEXT_KEY = "mailer_context"
+
+
+@dataclass(frozen=True)
+class MailerResult:
+    """What a service call did.
+
+    status is one of: sent, already_sent, replied, concluded, stopped, guardrail, recorded,
+    duplicate, unmatched, delivery_updated, unknown_email.
+    """
+
+    status: str
+    conversation_id: UUID | None = None
+    outcome: str | None = None
+    reason: str | None = None
+    email_id: UUID | None = None
+    follow_up_at: datetime | None = None
 
 
 class MailerService:
-    def __init__(self, *, repository: Any | None = None, email_provider: Any | None = None, llm: Any | None = None) -> None:
-        self.repository = repository
-        self.email_provider = email_provider
-        self.llm = llm
+    """Two-way email conversations grounded in each lead's Client KB.
 
-    async def validate_scope(self, *, user_id: UUID, lead_id: UUID | None = None, campaign_id: UUID | None = None, conversation_id: str | None = None) -> None:
-        if user_id is None:
-            raise MailerTenantError("user_id is required")
-        if lead_id is None and campaign_id is None and conversation_id is None:
-            raise MailerTenantError("At least one ownership scope must be provided")
-        if self.repository is None:
-            raise MailerTenantError("Repository ownership validation is unavailable")
-        if hasattr(self.repository, "get_conversation_for_user"):
-            match = await self.repository.get_conversation_for_user(user_id, lead_id=lead_id, campaign_id=campaign_id)
-            if match is None and (lead_id is not None or campaign_id is not None):
-                raise MailerTenantError("Requested Mailer resource is not owned by this tenant")
-        elif lead_id is not None or campaign_id is not None:
-            raise MailerTenantError("Requested Mailer resource is not owned by this tenant")
+    The caller owns the database transaction: this class flushes through the repository but never
+    commits, so a failure anywhere leaves nothing half written and the event can be retried.
+    """
 
-    async def open_conversation(self, *, user_id: UUID, lead_id: UUID, campaign_id: UUID | None, subject: str, status: str = "WAITING_FOR_LEAD") -> dict[str, Any]:
-        if self.repository is None:
-            return {
-                "conversation_id": str(UUID(int=0)),
-                "user_id": user_id,
-                "lead_id": lead_id,
-                "campaign_id": campaign_id,
-                "subject": subject,
-                "status": status,
-                "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
-            }
-        return await self.repository.create_or_get_conversation(
-            user_id=user_id,
-            lead_id=lead_id,
-            campaign_id=campaign_id,
-            subject=subject,
-            status=status,
+    def __init__(
+        self,
+        *,
+        repository: MailerRepository,
+        llm: LLM,
+        email_provider: EmailProvider,
+        knowledge_base: ClientKnowledgeBase,
+        settings: MailerSettings | None = None,
+    ) -> None:
+        self._repo = repository
+        self._llm = llm
+        self._email = email_provider
+        self._kb = knowledge_base
+        self._settings = settings or get_mailer_settings()
+
+    # -- outbound ------------------------------------------------------------------------
+
+    async def start_conversation(
+        self,
+        *,
+        user_id: UUID,
+        lead_id: UUID,
+        campaign_id: UUID | None = None,
+        campaign_objective: str | None = None,
+    ) -> MailerResult:
+        """Send the first email of a campaign to a lead.
+
+        Safe to run twice for the same lead and campaign: the second call finds the email that
+        was already sent and returns it instead of sending again.
+        """
+        self._require_reply_settings()
+        lead = await self._repo.get_lead(user_id=user_id, lead_id=lead_id)
+        if lead is None:
+            raise MailerTenantError("Lead is not owned by this tenant")
+        if not (lead.email or "").strip():
+            raise MailerValidationError("The lead has no email address, so the Mailer cannot contact it")
+        await self._refuse_if_do_not_contact(user_id, lead_id)
+
+        conversation, created = await self._repo.open_conversation(
+            user_id=user_id, lead_id=lead_id, campaign_id=campaign_id
         )
-
-    async def process_webhook_event(self, event: dict[str, Any]) -> dict[str, Any]:
-        if self.repository is None:
-            return {"status": "processed", "event_id": event.get("id")}
-        provider_event_id = str(event.get("id") or event.get("event_id") or "")
-        if provider_event_id:
-            created = await self.repository.record_webhook_event(provider_event_id=provider_event_id, payload=event)
-            if created is False:
-                return {"status": "duplicate", "event_id": provider_event_id}
-        return {"status": "processed", "event_id": provider_event_id}
-
-    async def correlate_inbound_email(self, email: dict[str, Any]) -> str | None:
-        if self.repository is None:
-            return None
-        existing = await self.repository.list_recent_messages(conversation_id=email.get("conversation_id") or "")
-        return await correlate_email(email, existing)
-
-    async def normalize_inbound_payload(self, *, provider_payload: dict[str, Any], user_id: UUID, lead_id: UUID, campaign_id: UUID | None) -> dict[str, Any]:
-        return {
-            "conversation_id": provider_payload.get("conversation_id"),
-            "user_id": user_id,
-            "lead_id": lead_id,
-            "campaign_id": campaign_id,
-            "direction": EmailDirection.INBOUND,
-            "from_address": provider_payload.get("from") or provider_payload.get("from_address"),
-            "to_addresses": provider_payload.get("to") or [],
-            "subject": provider_payload.get("subject"),
-            "text_body": provider_payload.get("text") or provider_payload.get("text_body"),
-            "html_body": provider_payload.get("html") or provider_payload.get("html_body"),
-            "provider": "resend",
-            "provider_email_id": provider_payload.get("email_id") or provider_payload.get("provider_email_id"),
-            "internet_message_id": provider_payload.get("internet_message_id"),
-            "in_reply_to": provider_payload.get("in_reply_to"),
-            "references_header": provider_payload.get("references") or provider_payload.get("references_header"),
-            "delivery_status": "received",
-            "provider_payload": provider_payload,
-            "sent_or_received_at": datetime.now(timezone.utc),
-        }
-
-    async def classify_outcome(self, *, lead_identity: str, campaign_objective: str, recent_thread: str, client_kb: str) -> AIEmailDecision:
-        if self.llm is None:
-            return AIEmailDecision(
-                subject="Re: Follow up",
-                text_body="Thanks for the reply. I’d be happy to continue the conversation.",
-                should_continue=True,
-                outcome="INTERESTED",
-                reason="Fallback decision based on workflow context.",
-                follow_up_at=None,
+        if (conversation.status or "OPEN") in _CLOSED_STATUSES:
+            raise MailerStopCondition(f"The conversation is {conversation.status.lower()}")
+        if not created:
+            earliest = await self._repo.list_emails(
+                user_id=user_id, conversation_id=conversation.id, limit=1
             )
-        # This method is intentionally lightweight because the actual LLM adapter remains a shared TPI concern.
-        decision = await self.llm.generate_json(
-            system_prompt="You are a lead-scouting assistant.",
-            user_prompt=f"Lead: {lead_identity}\nCampaign: {campaign_objective}\nThread: {recent_thread}\nKB: {client_kb}",
+            if earliest and earliest[0].direction == EmailDirection.OUTBOUND:
+                return MailerResult("already_sent", conversation.id, email_id=earliest[0].id)
+
+        objective = (campaign_objective or "").strip() or _DEFAULT_OBJECTIVE
+        passages = await self._search_kb(lead, objective)
+        generated = await self._generate(
+            GeneratedEmail,
+            build_first_email_prompt(
+                lead_identity=_identity(lead),
+                campaign_objective=objective,
+                client_kb=format_kb(passages),
+            ),
         )
-        return AIEmailDecision.model_validate(decision)
-
-    async def handle_stop_conditions(self, text: str | None, outcome: str | None) -> bool:
-        if classify_stop_condition(text):
-            return True
-        if outcome in {EmailOutcome.DO_NOT_CONTACT, EmailOutcome.NOT_INTERESTED, EmailOutcome.FAILED}:
-            return True
-        return not should_continue_from_outcome(outcome)
-
-    async def send_campaign_email(self, *, user_id: UUID, lead_id: UUID, campaign_id: UUID | None, subject: str, body: str, reply_to_token: str | None = None) -> dict[str, Any]:
-        if self.email_provider is None:
-            return {
-                "conversation_id": str(UUID(int=0)),
-                "user_id": user_id,
-                "lead_id": lead_id,
-                "campaign_id": campaign_id,
-                "status": "queued",
-                "provider_email_id": None,
-                "subject": subject,
-                "text_body": body,
-                "reply_to_token": reply_to_token,
-            }
-        return await self.email_provider.send_email(
+        sent = await self._send(
+            to=lead.email,
+            conversation_id=conversation.id,
+            subject=generated.subject,
+            text_body=generated.text_body,
+            in_reply_to=None,
+            references=None,
+            # Stable across retries and across a rolled-back conversation id, so the provider
+            # can drop a repeat if we sent but failed to save.
+            idempotency_key=f"mailer:first:{user_id}:{lead_id}:{campaign_id}",
+        )
+        email = await self._store_outbound(
+            conversation, lead.email, generated.subject, generated.text_body, sent,
+            in_reply_to=None, references=None, context={"campaign_objective": objective},
+        )
+        await self._repo.update_conversation(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            status="WAITING_FOR_LEAD",
+            add_turn=True,
+            provider_thread_id=sent.internet_message_id or sent.provider_email_id,
+        )
+        await self._repo.record_status_change(
             user_id=user_id,
             lead_id=lead_id,
             campaign_id=campaign_id,
+            previous_status=None,
+            new_status="CONTACTING",
+            source="SYSTEM",
+            reason="First email sent",
+        )
+        return MailerResult("sent", conversation.id, email_id=email.id)
+
+    # -- inbound -------------------------------------------------------------------------
+
+    async def handle_inbound_email(self, event: InboundEmailEvent) -> MailerResult:
+        """Record a lead's reply and, unless a stop condition applies, answer it."""
+        conversation = await self._correlate(event)
+        if conversation is None:
+            # Not marked as seen, so a provider retry can still match once our own record of
+            # the outbound email has been committed.
+            return MailerResult("unmatched", reason="No conversation matches this reply")
+        user_id, lead_id = conversation.user_id, conversation.lead_id
+        lead = await self._repo.get_lead(user_id=user_id, lead_id=lead_id)
+        if lead is None:
+            return MailerResult("unmatched", conversation.id, reason="The lead no longer exists")
+        if not await self._repo.record_webhook_event(
+            provider=event.provider, provider_event_id=event.event_id
+        ):
+            return MailerResult("duplicate", conversation.id)
+
+        inbound, created = await self._repo.add_email(
+            conversation_id=conversation.id,
+            user_id=user_id,
+            lead_id=lead_id,
+            direction=EmailDirection.INBOUND,
+            from_address=event.from_address,
+            to_addresses=event.to_addresses,
+            subject=event.subject,
+            text_body=event.text_body,
+            html_body=event.html_body,
+            provider=event.provider,
+            provider_email_id=event.provider_email_id,
+            internet_message_id=event.internet_message_id,
+            in_reply_to=event.in_reply_to,
+            references_header=event.references_header,
+            delivery_status="received",
+            provider_payload=event.raw_payload,
+            sent_or_received_at=event.received_at,
+        )
+        if not created:
+            return MailerResult("duplicate", conversation.id)
+        if (conversation.status or "OPEN") in _CLOSED_STATUSES:
+            return MailerResult("recorded", conversation.id, reason="The conversation is closed")
+
+        body = _plain_text(event)
+        if classify_stop_condition(body):
+            await self._conclude(
+                conversation, outcome=EmailOutcome.DO_NOT_CONTACT,
+                reason="The lead asked to stop receiving email", source="SYSTEM",
+            )
+            return MailerResult("stopped", conversation.id, outcome=EmailOutcome.DO_NOT_CONTACT)
+        if (conversation.turn_count or 0) >= self._settings.max_autonomous_text_turns:
+            await self._conclude(
+                conversation, outcome=EmailOutcome.FOLLOW_UP_REQUIRED, source="SYSTEM",
+                reason="Maximum autonomous turns reached; a person should take over",
+            )
+            return MailerResult(
+                "guardrail", conversation.id, outcome=EmailOutcome.FOLLOW_UP_REQUIRED
+            )
+
+        thread = await self._repo.list_recent_emails(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            limit=self._settings.mailer_thread_context_emails,
+        )
+        objective = await self._campaign_objective(user_id, conversation.id)
+        passages = await self._search_kb(lead, _strip_for_search(body, event.subject))
+        decision = await self._generate(
+            AIEmailDecision,
+            build_response_prompt(
+                lead_identity=_identity(lead),
+                campaign_objective=objective,
+                recent_thread=format_thread(thread),
+                client_kb=format_kb(passages),
+            ),
+        )
+        return await self._apply_decision(conversation, lead, event, thread, decision)
+
+    async def _apply_decision(
+        self, conversation: Any, lead: Any, event: InboundEmailEvent, thread: list[Any],
+        decision: AIEmailDecision,
+    ) -> MailerResult:
+        outcome = decision.outcome
+        keep_open = decision.should_continue and should_continue_from_outcome(outcome)
+        previous = conversation.outcome or "CONTACTING"
+        email_id = None
+        if outcome not in _NO_REPLY_OUTCOMES and decision.text_body:
+            subject = _reply_subject(decision.subject, thread)
+            references = _references(event)
+            in_reply_to = _bracket(event.internet_message_id)
+            sent = await self._send(
+                to=lead.email,
+                conversation_id=conversation.id,
+                subject=subject,
+                text_body=decision.text_body,
+                in_reply_to=in_reply_to,
+                references=references,
+                idempotency_key=f"mailer:reply:{event.provider}:{event.event_id}",
+            )
+            email = await self._store_outbound(
+                conversation, lead.email, subject, decision.text_body, sent,
+                in_reply_to=in_reply_to, references=references, context=None,
+            )
+            email_id = email.id
+
+        follow_up_at = _future(decision.follow_up_at)
+        if not keep_open:
+            status = "CONCLUDED"
+        elif outcome == EmailOutcome.FOLLOW_UP_REQUIRED and follow_up_at:
+            status = "SCHEDULED_FOLLOWUP"
+        else:
+            status = "WAITING_FOR_LEAD"
+        await self._repo.update_conversation(
+            user_id=conversation.user_id,
+            conversation_id=conversation.id,
+            status=status,
+            outcome=outcome.value,
+            add_turn=email_id is not None,
+            conclude=not keep_open,
+        )
+        if outcome.value != previous:
+            await self._repo.record_status_change(
+                user_id=conversation.user_id,
+                lead_id=conversation.lead_id,
+                campaign_id=conversation.campaign_id,
+                previous_status=previous,
+                new_status=outcome.value,
+                source="AI",
+                reason=decision.reason or None,
+            )
+        return MailerResult(
+            "replied" if keep_open else "concluded",
+            conversation.id,
+            outcome=outcome.value,
+            reason=decision.reason or None,
+            email_id=email_id,
+            follow_up_at=follow_up_at,
+        )
+
+    async def handle_delivery_event(self, event: DeliveryEvent) -> MailerResult:
+        """Apply a delivery report, and stop the conversation on a hard bounce or a complaint."""
+        if not await self._repo.record_webhook_event(
+            provider=event.provider, provider_event_id=event.event_id
+        ):
+            return MailerResult("duplicate")
+        email = await self._repo.update_delivery_status(
+            provider=event.provider,
+            provider_email_id=event.provider_email_id,
+            delivery_status=event.status,
+        )
+        if email is None:
+            return MailerResult("unknown_email")
+        status = event.status.strip().lower()
+        complaint = status == "complained"
+        hard_bounce = status in {"bounced", "failed"} and event.permanent
+        conversation = await self._repo.get_conversation(
+            user_id=email.user_id, conversation_id=email.conversation_id
+        )
+        if (
+            not (complaint or hard_bounce)
+            or conversation is None
+            or (conversation.status or "OPEN") in _CLOSED_STATUSES
+        ):
+            return MailerResult("delivery_updated", email.conversation_id, email_id=email.id)
+        if complaint:
+            await self._conclude(
+                conversation, outcome=EmailOutcome.DO_NOT_CONTACT, source="SYSTEM",
+                reason="The recipient marked the email as spam",
+            )
+            outcome = EmailOutcome.DO_NOT_CONTACT
+        else:
+            await self._conclude(
+                conversation, outcome=EmailOutcome.FAILED, source="SYSTEM", status="FAILED",
+                reason="The email bounced permanently",
+            )
+            outcome = EmailOutcome.FAILED
+        return MailerResult("stopped", conversation.id, outcome=outcome, email_id=email.id)
+
+    # -- internals -----------------------------------------------------------------------
+
+    def _require_reply_settings(self) -> None:
+        if not self._settings.mailer_reply_token_secret or not self._settings.mailer_reply_to_domain:
+            raise MailerConfigurationError(
+                "MAILER_REPLY_TOKEN_SECRET and MAILER_REPLY_TO_DOMAIN must be set before "
+                "the Mailer can send email"
+            )
+
+    def _reply_address(self, conversation_id: UUID) -> str:
+        self._require_reply_settings()
+        token = make_reply_to_token(conversation_id, self._settings.mailer_reply_token_secret)
+        return build_reply_to_address(
+            mailbox=self._settings.mailer_reply_to_mailbox,
+            domain=self._settings.mailer_reply_to_domain,
+            token=token,
+        )
+
+    async def _refuse_if_do_not_contact(self, user_id: UUID, lead_id: UUID) -> None:
+        conversations = await self._repo.list_conversations(
+            user_id=user_id, lead_id=lead_id, limit=200
+        )
+        if any(item.outcome == EmailOutcome.DO_NOT_CONTACT for item in conversations):
+            raise MailerStopCondition("The lead has asked not to be contacted")
+
+    async def _search_kb(self, lead: Any, query: str) -> list[KBPassage]:
+        return await self._kb.search(
+            user_id=lead.user_id,
+            website_id=lead.website_id,
+            query=query,
+            top_k=self._settings.mailer_kb_top_k,
+        )
+
+    async def _generate(self, model_cls: type[M], user_prompt: str) -> M:
+        prompt = user_prompt
+        for _ in range(2):
+            raw = await self._llm.generate_text(
+                system_prompt=SYSTEM_PROMPT, user_prompt=prompt, temperature=0.3, max_tokens=900
+            )
+            try:
+                return model_cls.model_validate(extract_json_object(raw))
+            except (ValueError, ValidationError):
+                prompt = (
+                    user_prompt
+                    + "\n\nYour previous answer was not valid. "
+                    "Reply with only the JSON object described above."
+                )
+        raise MailerProviderError("The model did not return a usable response", retryable=True)
+
+    async def _send(
+        self, *, to: str, conversation_id: UUID, subject: str, text_body: str,
+        in_reply_to: str | None, references: str | None, idempotency_key: str,
+    ) -> SentEmail:
+        return await self._email.send_email(
+            to=to,
             subject=subject,
-            body=body,
-            reply_to_token=reply_to_token,
+            text_body=text_body,
+            reply_to=self._reply_address(conversation_id),
+            in_reply_to=in_reply_to,
+            references=references,
+            idempotency_key=idempotency_key,
+            metadata={"conversation_id": str(conversation_id)},
         )
 
-    async def save_outbound_email(self, *, conversation_id: str, user_id: UUID, lead_id: UUID, campaign_id: UUID | None, subject: str, body: str, provider_email_id: str | None = None, provider_payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        if self.repository is None:
-            return {"conversation_id": conversation_id, "user_id": user_id, "lead_id": lead_id, "campaign_id": campaign_id, "subject": subject, "text_body": body, "provider_email_id": provider_email_id, "provider_payload": provider_payload or {}}
-        return await self.repository.save_email(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            lead_id=lead_id,
-            campaign_id=campaign_id,
+    async def _store_outbound(
+        self, conversation: Any, to: str, subject: str, text_body: str, sent: SentEmail, *,
+        in_reply_to: str | None, references: str | None, context: dict[str, Any] | None,
+    ) -> Any:
+        payload = dict(sent.payload)
+        if context:
+            payload[_CONTEXT_KEY] = context
+        email, _ = await self._repo.add_email(
+            conversation_id=conversation.id,
+            user_id=conversation.user_id,
+            lead_id=conversation.lead_id,
             direction=EmailDirection.OUTBOUND,
-            from_address="noreply@trexmail.io",
-            to_addresses=[],
+            from_address=sent.from_address,
+            to_addresses=[to],
             subject=subject,
-            text_body=body,
-            provider="resend",
-            provider_email_id=provider_email_id,
-            provider_payload=provider_payload or {},
-            sent_or_received_at=datetime.now(timezone.utc),
+            text_body=text_body,
+            provider=sent.provider,
+            provider_email_id=sent.provider_email_id,
+            internet_message_id=sent.internet_message_id,
+            in_reply_to=in_reply_to,
+            references_header=references,
+            delivery_status=sent.status,
+            provider_payload=payload,
+        )
+        return email
+
+    async def _conclude(
+        self, conversation: Any, *, outcome: EmailOutcome, reason: str, source: str,
+        status: str = "CONCLUDED",
+    ) -> None:
+        previous = conversation.outcome or "CONTACTING"
+        await self._repo.update_conversation(
+            user_id=conversation.user_id,
+            conversation_id=conversation.id,
+            status=status,
+            outcome=outcome.value,
+            conclude=True,
+        )
+        await self._repo.record_status_change(
+            user_id=conversation.user_id,
+            lead_id=conversation.lead_id,
+            campaign_id=conversation.campaign_id,
+            previous_status=previous,
+            new_status=outcome.value,
+            source=source,
+            reason=reason,
         )
 
-    async def save_inbound_email(self, *, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.repository is None:
-            return payload
-        return await self.repository.save_email(**payload)
+    async def _campaign_objective(self, user_id: UUID, conversation_id: UUID) -> str:
+        first = await self._repo.list_emails(user_id=user_id, conversation_id=conversation_id, limit=1)
+        context = (first[0].provider_payload or {}).get(_CONTEXT_KEY) if first else None
+        objective = (context or {}).get("campaign_objective") if isinstance(context, dict) else None
+        return objective or _DEFAULT_OBJECTIVE
 
-    async def process_inbound_email(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if not payload.get("user_id") or not payload.get("lead_id"):
-            raise MailerValidationError("Inbound payload is missing user_id or lead_id")
-        if self.repository is None:
-            return {"status": "processed", "payload": payload}
-        await self.repository.record_history_event(
-            user_id=payload["user_id"],
-            lead_id=payload["lead_id"],
-            campaign_id=payload.get("campaign_id"),
-            event_type="mailer.inbound_received",
-            payload=payload,
+    async def _correlate(self, event: InboundEmailEvent) -> Any | None:
+        """Find the conversation a reply belongs to. The tenant comes from the matched row."""
+        candidates: list[dict[str, Any]] = []
+        token = next(
+            (found for address in event.to_addresses if (found := extract_reply_to_token(address))),
+            None,
         )
-        return {"status": "processed", "payload": payload}
-
-    async def handle_bounce(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.repository is None:
-            return {"status": "handled", "event": payload}
-        outcome = payload.get("outcome") or "FAILED"
-        return {"status": "handled", "outcome": outcome, "event": payload}
-
-    async def finalize_outcome(self, *, outcome: str | None, reason: str | None) -> AIEmailDecision:
-        normalized = outcome or "NO_RESPONSE"
-        decision = AIEmailDecision(
-            subject="Re: Follow up",
-            text_body="Thanks for your response. I’ll keep the conversation moving.",
-            should_continue=should_continue_from_outcome(normalized),
-            outcome=normalized,
-            reason=reason or "Lead response processed.",
-            follow_up_at=compute_follow_up_at(normalized),
+        conversation_id = resolve_reply_to_token(token, self._settings.mailer_reply_token_secret)
+        if conversation_id is not None:
+            verified = await self._repo.get_conversation_by_verified_id(conversation_id)
+            if verified is not None:
+                candidates.append({"conversation_id": str(verified.id), "reply_to_token": token})
+        message_ids = parse_message_ids(event.in_reply_to) + parse_message_ids(event.references_header)
+        candidates += await self._repo.find_correlation_candidates(
+            message_ids=message_ids, provider_email_id=event.provider_email_id
         )
-        return decision
+        matched = await correlate_email(
+            {
+                "to_addresses": event.to_addresses,
+                "in_reply_to": event.in_reply_to,
+                "references_header": event.references_header,
+                "provider_email_id": event.provider_email_id,
+                "from_address": event.from_address,
+            },
+            candidates,
+        )
+        if matched is None:
+            return None
+        return await self._repo.get_conversation_by_verified_id(UUID(matched))
+
+
+def _identity(lead: Any) -> str:
+    name = (lead.display_name or " ".join(filter(None, [lead.first_name, lead.last_name]))).strip()
+    return ", ".join(part for part in (name or "the lead", lead.email, lead.website_url) if part)
+
+
+def _plain_text(event: InboundEmailEvent) -> str:
+    return event.text_body if (event.text_body or "").strip() else html_to_text(event.html_body)
+
+
+def _strip_for_search(body: str, subject: str | None) -> str:
+    return strip_quoted_reply(body) or (subject or "")
+
+
+def _bracket(message_id: str | None) -> str | None:
+    normalized = normalize_message_id(message_id)
+    return f"<{normalized}>" if normalized else None
+
+
+def _references(event: InboundEmailEvent) -> str | None:
+    ids: list[str] = []
+    for message_id in parse_message_ids(event.references_header) + parse_message_ids(
+        event.internet_message_id
+    ):
+        if message_id not in ids:
+            ids.append(message_id)
+    return " ".join(f"<{message_id}>" for message_id in ids) or None
+
+
+def _reply_subject(suggested: str, thread: list[Any]) -> str:
+    subject = suggested.strip()
+    if not subject:
+        last = next((email.subject for email in reversed(thread) if email.subject), "")
+        subject = last.strip() or "your message"
+    return subject if subject.lower().startswith("re:") else f"Re: {subject}"
+
+
+def _future(moment: datetime | None) -> datetime | None:
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment if moment > datetime.now(UTC) else None

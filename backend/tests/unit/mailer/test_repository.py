@@ -4,10 +4,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.calling import SeenWebhookEvent
 from app.models.lead import Lead
@@ -25,23 +23,6 @@ from app.modules.mailer.thread import (
     make_reply_to_token,
     resolve_reply_to_token,
 )
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine("sqlite+aiosqlite://")
-    async with engine.begin() as connection:
-        await connection.run_sync(MailerBase.metadata.create_all)
-        await connection.run_sync(SeenWebhookEvent.__table__.create)
-        await connection.run_sync(Lead.__table__.create)
-    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-        yield session
-    await engine.dispose()
-
-
-@pytest.fixture
-def repo(db):
-    return MailerRepository(db)
 
 
 async def _reload(db, conversation_id):
