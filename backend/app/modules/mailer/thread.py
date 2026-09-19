@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 from email.header import decode_header
 from typing import Iterable
+from uuid import UUID
+
+_SIGNATURE_LENGTH = 16
 
 
 def extract_reply_to_token(address: str | None) -> str | None:
@@ -12,6 +17,41 @@ def extract_reply_to_token(address: str | None) -> str | None:
     if match:
         return match.group(1)
     return None
+
+
+def _sign(value: str, secret: str) -> str:
+    digest = hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+    return digest[:_SIGNATURE_LENGTH]
+
+
+def make_reply_to_token(conversation_id: UUID, secret: str) -> str:
+    """Derive the Reply-To token for a conversation, so nothing has to be stored.
+
+    The token is the conversation id plus an HMAC of it. Anyone can read the id out of a
+    Reply-To address, but only the holder of `secret` can produce a token that verifies.
+    """
+    if not secret:
+        raise ValueError("a signing secret is required to build a Reply-To token")
+    return f"{conversation_id.hex}-{_sign(conversation_id.hex, secret)}"
+
+
+def resolve_reply_to_token(token: str | None, secret: str) -> UUID | None:
+    """Return the conversation id a token was issued for, or None if it is not genuine."""
+    if not token or not secret:
+        return None
+    key, separator, signature = token.strip().lower().partition("-")
+    if not separator or len(key) != 32:
+        return None
+    if not hmac.compare_digest(signature, _sign(key, secret)):
+        return None
+    try:
+        return UUID(hex=key)
+    except ValueError:
+        return None
+
+
+def build_reply_to_address(*, mailbox: str, domain: str, token: str) -> str:
+    return f"{mailbox}+{token}@{domain}"
 
 
 def parse_address_list(value: str | list[str] | None) -> list[str]:
