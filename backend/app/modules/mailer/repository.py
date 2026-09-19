@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import and_, case, func, or_, select, text, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -134,6 +134,25 @@ class MailerRepository:
             )
         )
 
+    def _conversation_filters(
+        self,
+        user_id: UUID,
+        lead_id: UUID | None,
+        campaign_id: UUID | None,
+        status: str | None,
+        outcome: str | None,
+    ) -> list[Any]:
+        conditions = list(self._email_scope(user_id))
+        if lead_id is not None:
+            conditions.append(EmailConversation.lead_id == lead_id)
+        if campaign_id is not None:
+            conditions.append(EmailConversation.campaign_id == campaign_id)
+        if status is not None:
+            conditions.append(EmailConversation.status == status)
+        if outcome is not None:
+            conditions.append(EmailConversation.outcome == outcome)
+        return conditions
+
     async def list_conversations(
         self,
         *,
@@ -143,20 +162,129 @@ class MailerRepository:
         lead_id: UUID | None = None,
         campaign_id: UUID | None = None,
         status: str | None = None,
+        outcome: str | None = None,
     ) -> list[EmailConversation]:
-        stmt = select(EmailConversation).where(*self._email_scope(user_id))
-        if lead_id is not None:
-            stmt = stmt.where(EmailConversation.lead_id == lead_id)
-        if campaign_id is not None:
-            stmt = stmt.where(EmailConversation.campaign_id == campaign_id)
-        if status is not None:
-            stmt = stmt.where(EmailConversation.status == status)
         stmt = (
-            stmt.order_by(EmailConversation.updated_at.desc().nulls_last(), EmailConversation.id.desc())
+            select(EmailConversation)
+            .where(*self._conversation_filters(user_id, lead_id, campaign_id, status, outcome))
+            .order_by(EmailConversation.updated_at.desc().nulls_last(), EmailConversation.id.desc())
             .limit(max(1, min(limit, 200)))
             .offset(max(0, offset))
         )
         return list((await self._db.scalars(stmt)).all())
+
+    async def count_conversations(
+        self,
+        *,
+        user_id: UUID,
+        lead_id: UUID | None = None,
+        campaign_id: UUID | None = None,
+        status: str | None = None,
+        outcome: str | None = None,
+    ) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(EmailConversation)
+            .where(*self._conversation_filters(user_id, lead_id, campaign_id, status, outcome))
+        )
+        return int(await self._db.scalar(stmt) or 0)
+
+    async def conversation_overview(
+        self, *, user_id: UUID, conversation_ids: Sequence[UUID]
+    ) -> dict[UUID, dict[str, Any]]:
+        """Figures for a page of conversations, gathered in two queries instead of two per row."""
+        ids = list(conversation_ids)
+        overview: dict[UUID, dict[str, Any]] = {
+            conversation_id: {
+                "email_count": 0,
+                "reply_count": 0,
+                "first_subject": None,
+                "last_direction": None,
+                "last_activity_at": None,
+                "delivery_status": None,
+            }
+            for conversation_id in ids
+        }
+        if not ids:
+            return overview
+        counts = await self._db.execute(
+            select(Email.conversation_id, Email.direction, func.count())
+            .where(Email.user_id == user_id, Email.conversation_id.in_(ids))
+            .group_by(Email.conversation_id, Email.direction)
+        )
+        for conversation_id, direction, number in counts:
+            overview[conversation_id]["email_count"] += number
+            if direction == EmailDirection.INBOUND.value:
+                overview[conversation_id]["reply_count"] += number
+
+        newest = (Email.sent_or_received_at.desc(), Email.created_at.desc(), Email.id.desc())
+        oldest = (Email.sent_or_received_at.asc(), Email.created_at.asc(), Email.id.asc())
+        ranked = (
+            select(
+                Email.conversation_id.label("conversation_id"),
+                Email.direction.label("direction"),
+                Email.subject.label("subject"),
+                Email.delivery_status.label("delivery_status"),
+                Email.sent_or_received_at.label("moment"),
+                func.row_number().over(partition_by=Email.conversation_id, order_by=newest).label("newest"),
+                func.row_number().over(partition_by=Email.conversation_id, order_by=oldest).label("oldest"),
+                func.row_number()
+                .over(partition_by=(Email.conversation_id, Email.direction), order_by=newest)
+                .label("newest_in_direction"),
+            )
+            .where(Email.user_id == user_id, Email.conversation_id.in_(ids))
+            .subquery()
+        )
+        rows = await self._db.execute(
+            select(ranked).where(
+                or_(
+                    ranked.c.newest == 1,
+                    ranked.c.oldest == 1,
+                    and_(
+                        ranked.c.direction == EmailDirection.OUTBOUND.value,
+                        ranked.c.newest_in_direction == 1,
+                    ),
+                )
+            )
+        )
+        for row in rows:
+            entry = overview[row.conversation_id]
+            if row.newest == 1:
+                entry["last_direction"] = row.direction
+                entry["last_activity_at"] = row.moment
+            if row.oldest == 1:
+                entry["first_subject"] = row.subject
+            if row.direction == EmailDirection.OUTBOUND.value and row.newest_in_direction == 1:
+                entry["delivery_status"] = row.delivery_status
+        return overview
+
+    async def email_metrics(self, *, user_id: UUID) -> dict[str, int]:
+        """Headline counts for the Mailer page (Master PRD 32.31)."""
+        outbound = Email.direction == EmailDirection.OUTBOUND.value
+
+        def count_if(condition: Any):
+            return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
+
+        row = (
+            await self._db.execute(
+                select(
+                    count_if(outbound),
+                    count_if(and_(outbound, Email.delivery_status == "delivered")),
+                    count_if(Email.direction == EmailDirection.INBOUND.value),
+                    count_if(and_(outbound, Email.delivery_status.in_(tuple(_DELIVERY_FAILURES)))),
+                ).where(Email.user_id == user_id)
+            )
+        ).one()
+        interested = await self.count_conversations(user_id=user_id, outcome="INTERESTED")
+        total = await self.count_conversations(user_id=user_id)
+        return {
+            "conversations": total,
+            "emails_sent": int(row[0]),
+            "delivered": int(row[1]),
+            "replies": int(row[2]),
+            "bounced": int(row[3]),
+            "interested": interested,
+        }
 
     async def update_conversation(
         self,
@@ -393,6 +521,13 @@ class MailerRepository:
         return await self._db.scalar(
             select(Lead).where(Lead.user_id == user_id, Lead.id == lead_id)
         )
+
+    async def get_leads(self, *, user_id: UUID, lead_ids: Sequence[UUID]) -> dict[UUID, Lead]:
+        ids = list(set(lead_ids))
+        if not ids:
+            return {}
+        rows = await self._db.scalars(select(Lead).where(Lead.user_id == user_id, Lead.id.in_(ids)))
+        return {lead.id: lead for lead in rows.all()}
 
     async def record_status_change(
         self,
