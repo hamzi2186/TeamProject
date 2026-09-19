@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from app.modules.mailer.contracts import EmailOutcome
+
 
 def classify_stop_condition(text: str | None) -> bool:
     if not text:
@@ -24,11 +26,17 @@ def classify_stop_condition(text: str | None) -> bool:
 def should_continue_from_outcome(outcome: str | None) -> bool:
     if outcome is None:
         return True
-    definitive = {"INTERESTED", "NOT_INTERESTED", "UNSUBSCRIBED", "FAILED"}
+    definitive = {
+        EmailOutcome.INTERESTED,
+        EmailOutcome.NOT_INTERESTED,
+        EmailOutcome.CONVERTED,
+        EmailOutcome.DO_NOT_CONTACT,
+        EmailOutcome.FAILED,
+    }
     return outcome not in definitive
 
 
 def compute_follow_up_at(outcome: str | None) -> datetime | None:
-    if outcome == "FOLLOW_UP_LATER":
+    if outcome == EmailOutcome.FOLLOW_UP_REQUIRED:
         return datetime.utcnow() + timedelta(days=3)
     return None

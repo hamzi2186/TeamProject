@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from app.modules.mailer.contracts import AIEmailDecision
+from app.modules.mailer.contracts import AIEmailDecision, EmailDirection, EmailOutcome
 from app.modules.mailer.exceptions import MailerTenantError, MailerValidationError
 from app.modules.mailer.outcome import classify_stop_condition, compute_follow_up_at, should_continue_from_outcome
 from app.modules.mailer.thread import correlate_email
@@ -72,7 +72,7 @@ class MailerService:
             "user_id": user_id,
             "lead_id": lead_id,
             "campaign_id": campaign_id,
-            "direction": "inbound",
+            "direction": EmailDirection.INBOUND,
             "from_address": provider_payload.get("from") or provider_payload.get("from_address"),
             "to_addresses": provider_payload.get("to") or [],
             "subject": provider_payload.get("subject"),
@@ -85,7 +85,7 @@ class MailerService:
             "references_header": provider_payload.get("references") or provider_payload.get("references_header"),
             "delivery_status": "received",
             "provider_payload": provider_payload,
-            "timestamp": datetime.now(timezone.utc),
+            "sent_or_received_at": datetime.now(timezone.utc),
         }
 
     async def classify_outcome(self, *, lead_identity: str, campaign_objective: str, recent_thread: str, client_kb: str) -> AIEmailDecision:
@@ -108,7 +108,7 @@ class MailerService:
     async def handle_stop_conditions(self, text: str | None, outcome: str | None) -> bool:
         if classify_stop_condition(text):
             return True
-        if outcome in {"UNSUBSCRIBED", "NOT_INTERESTED", "FAILED"}:
+        if outcome in {EmailOutcome.DO_NOT_CONTACT, EmailOutcome.NOT_INTERESTED, EmailOutcome.FAILED}:
             return True
         return not should_continue_from_outcome(outcome)
 
@@ -142,7 +142,7 @@ class MailerService:
             user_id=user_id,
             lead_id=lead_id,
             campaign_id=campaign_id,
-            direction="outbound",
+            direction=EmailDirection.OUTBOUND,
             from_address="noreply@trexmail.io",
             to_addresses=[],
             subject=subject,
@@ -150,7 +150,7 @@ class MailerService:
             provider="resend",
             provider_email_id=provider_email_id,
             provider_payload=provider_payload or {},
-            timestamp=datetime.now(timezone.utc),
+            sent_or_received_at=datetime.now(timezone.utc),
         )
 
     async def save_inbound_email(self, *, payload: dict[str, Any]) -> dict[str, Any]:

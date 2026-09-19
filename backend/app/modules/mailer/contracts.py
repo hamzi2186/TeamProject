@@ -1,27 +1,35 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-EmailDirection = Literal["inbound", "outbound"]
-EmailOutcome = Literal[
-    "INTERESTED",
-    "NOT_INTERESTED",
-    "UNSUBSCRIBED",
-    "FOLLOW_UP_LATER",
-    "NO_RESPONSE",
-    "FAILED",
-]
+
+class EmailDirection(StrEnum):
+    INBOUND = "INBOUND"
+    OUTBOUND = "OUTBOUND"
+
+
+class EmailOutcome(StrEnum):
+    """The subset of the canonical lead outcomes (Master PRD section 41) an email turn can produce."""
+
+    INTERESTED = "INTERESTED"
+    NOT_INTERESTED = "NOT_INTERESTED"
+    FOLLOW_UP_REQUIRED = "FOLLOW_UP_REQUIRED"
+    NO_RESPONSE = "NO_RESPONSE"
+    CONVERTED = "CONVERTED"
+    DO_NOT_CONTACT = "DO_NOT_CONTACT"
+    FAILED = "FAILED"
 
 
 class AIEmailDecision(BaseModel):
     subject: str
     text_body: str
     should_continue: bool = True
-    outcome: EmailOutcome = "NO_RESPONSE"
+    outcome: EmailOutcome = EmailOutcome.NO_RESPONSE
     reason: str = ""
     follow_up_at: datetime | None = None
 
@@ -45,7 +53,7 @@ class EmailRecord(BaseModel):
     user_id: UUID | None = None
     lead_id: UUID | None = None
     campaign_id: UUID | None = None
-    direction: EmailDirection = "outbound"
+    direction: EmailDirection = EmailDirection.OUTBOUND
     from_address: str | None = None
     to_addresses: list[str] = Field(default_factory=list)
     subject: str | None = None
@@ -58,7 +66,7 @@ class EmailRecord(BaseModel):
     references_header: str | None = None
     delivery_status: str = "queued"
     provider_payload: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime | None = None
+    sent_or_received_at: datetime | None = None
     reply_to_token: str | None = None
 
 

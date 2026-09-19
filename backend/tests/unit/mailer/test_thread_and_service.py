@@ -2,9 +2,11 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
-from app.modules.mailer.contracts import AIEmailDecision
+from app.modules.mailer.contracts import AIEmailDecision, EmailDirection, EmailOutcome, EmailRecord
 from app.modules.mailer.exceptions import MailerTenantError
+from app.modules.mailer.outcome import compute_follow_up_at, should_continue_from_outcome
 from app.modules.mailer.thread import correlate_email, extract_reply_to_token, parse_address_list
 from app.modules.mailer.service import MailerService
 
@@ -74,8 +76,8 @@ async def test_thread_correlation_priority():
         "references_header": "<ref-1@example.com>",
         "reply_to_token": "token-777",
         "from_address": "lead@example.com",
-        "direction": "outbound",
-        "timestamp": datetime.now(timezone.utc),
+        "direction": "OUTBOUND",
+        "sent_or_received_at": datetime.now(timezone.utc),
     }]
     email = {
         "user_id": user_id,
@@ -126,3 +128,41 @@ async def test_structured_ai_output():
 async def test_parse_address_list_handles_multiple_recipients():
     assert parse_address_list("one@example.com, two@example.com") == ["one@example.com", "two@example.com"]
     assert parse_address_list(None) == []
+
+
+@pytest.mark.parametrize("legacy", ["UNSUBSCRIBED", "FOLLOW_UP_LATER", "inbound", "outbound"])
+def test_non_canonical_values_are_rejected(legacy):
+    with pytest.raises(ValidationError):
+        AIEmailDecision(subject="s", text_body="b", outcome=legacy)
+    with pytest.raises(ValidationError):
+        EmailRecord(direction=legacy)
+
+
+def test_email_outcomes_are_a_subset_of_the_canonical_lead_outcomes():
+    canonical = {
+        "NEW", "CONTACTING", "INTERESTED", "NOT_INTERESTED", "FOLLOW_UP_REQUIRED",
+        "NO_ANSWER", "NO_RESPONSE", "CONVERTED", "DO_NOT_CONTACT", "COMPLETED", "FAILED",
+    }
+    assert {item.value for item in EmailOutcome} <= canonical
+    assert EmailOutcome.DO_NOT_CONTACT in EmailOutcome
+
+
+def test_direction_defaults_and_record_field_matches_the_emails_column():
+    record = EmailRecord()
+    assert record.direction is EmailDirection.OUTBOUND
+    assert "sent_or_received_at" in EmailRecord.model_fields
+    assert "timestamp" not in EmailRecord.model_fields
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [EmailOutcome.DO_NOT_CONTACT, EmailOutcome.NOT_INTERESTED, EmailOutcome.CONVERTED, EmailOutcome.FAILED],
+)
+def test_definitive_outcomes_stop_the_thread(outcome):
+    assert should_continue_from_outcome(outcome) is False
+
+
+def test_follow_up_required_schedules_a_follow_up_and_keeps_the_thread_open():
+    assert should_continue_from_outcome(EmailOutcome.FOLLOW_UP_REQUIRED) is True
+    assert compute_follow_up_at(EmailOutcome.FOLLOW_UP_REQUIRED) is not None
+    assert compute_follow_up_at(EmailOutcome.NO_RESPONSE) is None
