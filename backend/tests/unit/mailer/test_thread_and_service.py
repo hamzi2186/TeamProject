@@ -7,7 +7,13 @@ from pydantic import ValidationError
 from app.modules.mailer.contracts import AIEmailDecision, EmailDirection, EmailOutcome, EmailRecord
 from app.modules.mailer.exceptions import MailerTenantError
 from app.modules.mailer.outcome import compute_follow_up_at, should_continue_from_outcome
-from app.modules.mailer.thread import correlate_email, extract_reply_to_token, parse_address_list
+from app.modules.mailer.thread import (
+    correlate_email,
+    extract_reply_to_token,
+    normalize_message_id,
+    parse_address_list,
+    parse_message_ids,
+)
 from app.modules.mailer.service import MailerService
 
 
@@ -166,3 +172,103 @@ def test_follow_up_required_schedules_a_follow_up_and_keeps_the_thread_open():
     assert should_continue_from_outcome(EmailOutcome.FOLLOW_UP_REQUIRED) is True
     assert compute_follow_up_at(EmailOutcome.FOLLOW_UP_REQUIRED) is not None
     assert compute_follow_up_at(EmailOutcome.NO_RESPONSE) is None
+
+
+def test_follow_up_time_is_timezone_aware():
+    follow_up = compute_follow_up_at(EmailOutcome.FOLLOW_UP_REQUIRED)
+    assert follow_up.tzinfo is not None
+    assert follow_up > datetime.now(timezone.utc)  # a naive value would raise TypeError here
+
+
+def _sent(conversation_id, **fields):
+    """An email we sent. Its from_address is ours, so the last-resort sender fallback can never
+    match a reply from the lead and mask a broken header match in the tests below."""
+    return {
+        "conversation_id": conversation_id,
+        "direction": "OUTBOUND",
+        "lead_id": "lead-1",
+        "campaign_id": "camp-1",
+        "from_address": "outreach@us.example",
+        **fields,
+    }
+
+
+def _inbound(**fields):
+    return {"lead_id": "lead-1", "campaign_id": "camp-1", "from_address": "lead@them.example", **fields}
+
+
+def test_message_id_helpers():
+    assert normalize_message_id(" <a@x> ") == "a@x"
+    assert normalize_message_id("a@x") == "a@x"
+    assert normalize_message_id(None) == ""
+    assert parse_message_ids("<root@x>\n <a@x>  <b@x>") == ["root@x", "a@x", "b@x"]
+    assert parse_message_ids("bare@x other@x") == ["bare@x", "other@x"]
+    assert parse_message_ids(None) == []
+    assert parse_message_ids("   ") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header", ["<a@x>", "a@x", "  <a@x>  "])
+async def test_in_reply_to_matches_the_stored_message_id_however_it_is_bracketed(header):
+    existing = [_sent("c1", internet_message_id="<a@x>"), _sent("c2", internet_message_id="<b@x>")]
+    assert await correlate_email(_inbound(in_reply_to=header), existing) == "c1"
+
+
+@pytest.mark.asyncio
+async def test_in_reply_to_never_matches_a_provider_uuid():
+    # In-Reply-To carries an RFC Message-ID; a Resend id can only collide by accident.
+    existing = [_sent("c1", provider_email_id="re_123", internet_message_id="<a@x>")]
+    assert await correlate_email(_inbound(in_reply_to="re_123"), existing) is None
+
+
+@pytest.mark.asyncio
+async def test_references_match_even_when_longer_than_anything_we_stored():
+    # References grows down a thread, so the inbound header is a superset of what we sent.
+    existing = [_sent("c1", internet_message_id="<a@x>", references_header="<root@x>")]
+    email = _inbound(references_header="<root@x> <a@x>")
+    assert await correlate_email(email, existing) == "c1"
+
+
+@pytest.mark.asyncio
+async def test_references_resolve_to_the_nearest_ancestor_we_sent():
+    existing = [_sent("c1", internet_message_id="<a@x>"), _sent("c2", internet_message_id="<b@x>")]
+    email = _inbound(references_header="<root@x> <a@x> <b@x> <reply@x>")
+    assert await correlate_email(email, existing) == "c2"
+
+
+@pytest.mark.asyncio
+async def test_reply_to_token_outranks_message_headers():
+    existing = [
+        _sent("c1", reply_to_token="tok-1"),
+        _sent("c2", internet_message_id="<a@x>"),
+    ]
+    email = _inbound(to_addresses=["mailer+tok-1@reply.example.com"], in_reply_to="<a@x>")
+    assert await correlate_email(email, existing) == "c1"
+
+
+@pytest.mark.asyncio
+async def test_in_reply_to_outranks_references():
+    existing = [_sent("c1", internet_message_id="<a@x>"), _sent("c2", internet_message_id="<b@x>")]
+    email = _inbound(in_reply_to="<a@x>", references_header="<b@x>")
+    assert await correlate_email(email, existing) == "c1"
+
+
+@pytest.mark.asyncio
+async def test_subject_alone_never_correlates():
+    existing = [_sent("c1", subject="Demo", internet_message_id="<a@x>")]
+    assert await correlate_email(_inbound(subject="Re: Demo"), existing) is None
+
+
+@pytest.mark.asyncio
+async def test_missing_identifiers_do_not_match_by_none_equals_none():
+    existing = [_sent("c1", lead_id=None, campaign_id=None, from_address="")]
+    assert await correlate_email({}, existing) is None
+
+
+@pytest.mark.asyncio
+async def test_correlation_accepts_a_generator_of_conversations():
+    # The header lookup runs first and finds nothing; the provider-id lookup must still see the
+    # conversations. A generator would already be exhausted by then if it were not copied.
+    existing = (item for item in [_sent("c1", provider_email_id="re_1")])
+    email = _inbound(in_reply_to="<unrelated@x>", provider_email_id="re_1")
+    assert await correlate_email(email, existing) == "c1"

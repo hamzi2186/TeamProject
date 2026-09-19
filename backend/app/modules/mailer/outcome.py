@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from app.modules.mailer.contracts import EmailOutcome
 
@@ -38,5 +38,5 @@ def should_continue_from_outcome(outcome: str | None) -> bool:
 
 def compute_follow_up_at(outcome: str | None) -> datetime | None:
     if outcome == EmailOutcome.FOLLOW_UP_REQUIRED:
-        return datetime.utcnow() + timedelta(days=3)
+        return datetime.now(UTC) + timedelta(days=3)
     return None

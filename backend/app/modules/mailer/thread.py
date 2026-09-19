@@ -34,6 +34,22 @@ def decode_address_header(value: str | None) -> str | None:
     return "".join(decoded_parts)
 
 
+_MESSAGE_ID = re.compile(r"<[^<>\s]+>")
+
+
+def normalize_message_id(value: str | None) -> str:
+    """Strip whitespace and angle brackets so `<a@x>` and `a@x` compare equal."""
+    return (value or "").strip().strip("<>").strip()
+
+
+def parse_message_ids(value: str | None) -> list[str]:
+    """Split an In-Reply-To / References header into normalized Message-IDs, oldest first."""
+    if not value:
+        return []
+    tokens = _MESSAGE_ID.findall(value) or value.split()
+    return [message_id for message_id in (normalize_message_id(token) for token in tokens) if message_id]
+
+
 async def correlate_email(email: dict, existing: Iterable[dict]) -> str | None:
     """return the matched conversation_id or None.
 
@@ -43,7 +59,10 @@ async def correlate_email(email: dict, existing: Iterable[dict]) -> str | None:
     3. References
     4. provider message/thread identifiers
     5. sender + active campaign fallback only when unambiguous
+
+    `existing` must already be scoped to the tenant by the caller.
     """
+    items = list(existing)
     email_to = parse_address_list(email.get("to_addresses"))
     reply_token = None
     for address in email_to:
@@ -52,37 +71,43 @@ async def correlate_email(email: dict, existing: Iterable[dict]) -> str | None:
             reply_token = token
             break
     if reply_token:
-        for item in existing:
+        for item in items:
             if str(item.get("reply_to_token") or "") == reply_token:
                 return str(item["conversation_id"])
 
-    inbound_message_id = (email.get("in_reply_to") or "").strip()
-    if inbound_message_id:
-        for item in existing:
-            if str(item.get("provider_email_id") or "") == inbound_message_id or str(
-                item.get("internet_message_id") or ""
-            ) == inbound_message_id:
-                return str(item["conversation_id"])
+    # In-Reply-To and References carry RFC 5322 Message-IDs, so they can only match the
+    # internet_message_id we stored. provider_email_id is a provider UUID, never a Message-ID.
+    known_message_ids: dict[str, str] = {}
+    for item in items:
+        message_id = normalize_message_id(item.get("internet_message_id"))
+        if message_id:
+            known_message_ids[message_id] = str(item["conversation_id"])
 
-    references = (email.get("references_header") or "").strip()
-    if references:
-        for item in existing:
-            if str(item.get("references_header") or "") and references in str(
-                item.get("references_header")
-            ):
-                return str(item["conversation_id"])
+    for message_id in parse_message_ids(email.get("in_reply_to")):
+        if message_id in known_message_ids:
+            return known_message_ids[message_id]
+
+    # References grows down a thread (oldest first), so walk it newest first to find the
+    # nearest ancestor we sent.
+    for message_id in reversed(parse_message_ids(email.get("references_header"))):
+        if message_id in known_message_ids:
+            return known_message_ids[message_id]
 
     provider_email_id = (email.get("provider_email_id") or "").strip()
     if provider_email_id:
-        for item in existing:
+        for item in items:
             if str(item.get("provider_email_id") or "") == provider_email_id:
                 return str(item["conversation_id"])
 
     sender = (email.get("from_address") or "").lower()
     campaign_id = email.get("campaign_id")
+    lead_id = email.get("lead_id")
+    if not sender or lead_id is None:
+        # Without a sender and a resolved lead, `None == None` would match any conversation.
+        return None
     candidates = []
-    for item in existing:
-        if item.get("lead_id") == email.get("lead_id") and item.get("campaign_id") == campaign_id:
+    for item in items:
+        if item.get("lead_id") == lead_id and item.get("campaign_id") == campaign_id:
             if str(item.get("from_address") or "").lower() == sender:
                 candidates.append(item)
     if len(candidates) == 1:
